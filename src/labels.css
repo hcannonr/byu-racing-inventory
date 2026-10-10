@@ -1,0 +1,38 @@
+.labels-controls{background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px}
+.labels-settings{display:flex;gap:16px;padding-bottom:22px;border-bottom:1px solid var(--border)}
+.labels-settings label{display:flex;flex-direction:column;gap:8px;font-size:13px;color:var(--muted)}
+.labels-settings select{padding:10px 12px;min-height:42px;border:1px solid var(--border);border-radius:7px;background:#fff;color:var(--navy);max-width:100%}
+.label-selector-heading,.label-preview-heading{display:flex;justify-content:space-between;align-items:center;gap:20px;margin:23px 0 16px}
+.label-selector-heading p,.label-preview-heading p{font-size:13px;margin-top:7px}
+.label-selector-heading .search-field{max-width:310px;width:100%}
+.label-selection-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;padding-bottom:12px}
+.label-selection-actions>div{display:flex;gap:18px;flex-shrink:0}
+.label-part-list{max-height:350px;overflow:auto;overscroll-behavior:contain;border-top:1px solid var(--border)}
+.label-part-row{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:14px 0;border-bottom:1px solid #e8edf2}
+.label-part-row>div:first-child{min-width:0}.label-part-row strong{display:block;font-size:14px;overflow-wrap:anywhere}.label-part-row>div>span{display:block;font-size:12px;color:var(--muted);margin-top:5px;overflow-wrap:anywhere}
+.label-bin-choices{display:flex;gap:20px;flex-shrink:0}.label-bin-choices label{display:flex;gap:9px;align-items:center;min-height:42px;cursor:pointer}.label-bin-choices input{width:18px;height:18px;accent-color:var(--blue)}.label-bin-choices b{font-size:13px;white-space:nowrap}.label-bin-choices small{display:block;font-size:11px;color:var(--muted);margin-top:3px}
+.label-no-results{font-size:13px;padding:18px 0;color:var(--muted)}
+.label-preview-note{font-size:13px;color:var(--muted);margin-bottom:16px}
+.label-preview{width:100%;min-width:0}.label-paper-list{display:flex;flex-direction:column;align-items:center;gap:24px}
+.label-sheet-caption{color:var(--muted);font-size:12px;margin-bottom:8px}.label-paper-frame{position:relative}.label-paper{width:var(--paper-width);height:var(--paper-height);padding:10mm;background:#fff;box-shadow:0 4px 20px #142b4510;transform:scale(var(--preview-scale));transform-origin:top left;overflow:visible}
+.label-measure{position:fixed;left:-10000px;top:0;width:184mm;visibility:hidden;pointer-events:none}
+.printed-label-row{display:flex;align-items:flex-start;gap:6mm;width:184mm;margin:0 0 6mm;break-inside:avoid;page-break-inside:avoid}.printed-label-row:last-child{margin-bottom:0}
+.printed-bin-label{color:#000;background:#fff;flex:0 0 89mm;width:89mm;min-height:51mm;padding:3mm;border:.25mm dashed #777;font-family:Arial,sans-serif;break-inside:avoid;page-break-inside:avoid}
+.printed-bin-label.code128{flex-basis:184mm;width:184mm}.printed-label-top{display:flex;align-items:flex-start;justify-content:space-between;gap:3mm;margin-bottom:3mm}
+.printed-label-top>strong{font-size:17pt;line-height:1.05;white-space:nowrap}.printed-label-top small{display:block;font-size:9pt;line-height:1.3;margin-top:1mm;font-weight:400}
+.printed-label-top>span{font-size:9pt;text-align:right;overflow-wrap:anywhere;max-width:49mm;line-height:1.3}.printed-label-top b{display:block;font-size:8pt;letter-spacing:1px;margin-top:1mm}
+.printed-bin-label h3{font-size:12pt;line-height:1.2;overflow-wrap:anywhere;letter-spacing:0;margin-bottom:2mm;font-weight:700}
+.printed-spec{font-size:10pt;line-height:1.3;overflow-wrap:anywhere;white-space:pre-wrap;margin-bottom:3mm}
+.printed-code{display:flex;align-items:center;gap:3mm}.printed-code img{width:26mm;height:26mm;display:block;flex-shrink:0;background:#fff}.printed-code>div{min-width:0;flex:1}.printed-code code{display:block;font-size:9pt;overflow-wrap:anywhere;line-height:1.25;color:#000}.printed-code strong{display:block;font-size:10pt;line-height:1.2;margin-top:2mm}
+.code128 .printed-code{flex-direction:column;align-items:flex-start;gap:2mm}.code128 .printed-code img{width:176mm;height:24mm;max-width:none}.code128 .printed-code>div{display:flex;justify-content:space-between;gap:5mm;width:100%}.code128 .printed-code strong{margin-top:0}.code128 .printed-code code{font-size:10pt}
+.label-empty{background:#fff;border:1px dashed #c8d3df;border-radius:12px;padding:42px 20px;display:flex;align-items:center;flex-direction:column;text-align:center;color:var(--muted);gap:12px}.label-empty h3{color:var(--navy)}.label-empty p{font-size:13px}
+@media(max-width:600px){.labels-controls{padding:17px}.labels-settings{gap:12px}.labels-settings label{flex:1;min-width:0}.labels-settings select{font-size:12px;padding:10px 5px}.label-selector-heading{flex-direction:column;align-items:stretch;gap:15px}.label-selector-heading .search-field{max-width:none}.label-selection-actions{align-items:flex-start;flex-direction:column;gap:8px}.label-part-row{gap:10px}.label-bin-choices{gap:12px}.label-bin-choices label{gap:6px}.label-bin-choices b{font-size:12px}.label-part-row strong{font-size:13px}.label-preview-heading{align-items:flex-start;flex-wrap:wrap;gap:12px}.label-preview-heading h2{font-size:20px}}
+@media print{
+ body.printing-bin-labels{margin:0;background:#fff;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ body.printing-bin-labels .app-header,body.printing-bin-labels .demo-banner,body.printing-bin-labels .offline-banner,body.printing-bin-labels .page-heading,body.printing-bin-labels .toast,body.printing-bin-labels .page-footer,body.printing-bin-labels dialog,body.printing-bin-labels .labels-controls,body.printing-bin-labels .label-preview-heading,body.printing-bin-labels .label-preview-note,body.printing-bin-labels .label-measure,body.printing-bin-labels .label-sheet-caption{display:none!important}
+ body.printing-bin-labels .app-shell,body.printing-bin-labels .workspace,body.printing-bin-labels main,body.printing-bin-labels .labels-view,body.printing-bin-labels .label-preview,body.printing-bin-labels .label-paper-list{display:block!important;margin:0!important;padding:0!important;width:auto!important;max-width:none!important;min-height:0!important;overflow:visible!important}
+ body.printing-bin-labels .label-paper-frame{width:auto!important;height:auto!important}
+ body.printing-bin-labels .label-paper{transform:none;box-shadow:none;break-after:page;page-break-after:always}
+ body.printing-bin-labels .label-sheet-wrapper:last-child .label-paper{break-after:auto;page-break-after:auto}
+ body.printing-bin-labels .label-empty,body.printing-bin-labels .inline-error{display:none!important}
+}

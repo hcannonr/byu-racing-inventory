@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src", "server", "shared", "api", "vite.config.ts"],
+  "exclude": ["tests", ".implementation", "node_modules"]
+}
