@@ -3,11 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { DomainError } from './domain.ts';
 import { quantityToBuy, type Command, type InventoryState, type RefillRequest } from '../shared/types.ts';
-import { testEmailSubject, testEmailText, type EmailConfiguration, type EmailPayload, type NotificationJob, type NotificationKind, type NotificationSettings, type NotificationSnapshot } from '../shared/notifications.ts';
+import { sameRecipients, buyerRecipients, testEmailSubject, testEmailText, type EmailConfiguration, type EmailPayload, type NotificationJob, type NotificationKind, type NotificationSettings, type NotificationSnapshot } from '../shared/notifications.ts';
 import type { EmailOutcome } from './emailTransport.ts';
 
 const settingsSchema = z.object({
-  type: z.literal('save'), recipient: z.union([z.literal(''), z.email()]).transform(s => s.trim()),
+  type: z.literal('save'), recipients: z.array(z.string().trim().email().max(254)).max(20).optional(), recipient: z.union([z.literal(''), z.email()]).transform(s => s.trim()),
   reminderHours: z.number().int().min(24).max(168),
   dashboardUrl: z.union([z.literal(''), z.url().max(2000).refine(s => /^https?:\/\//i.test(s), 'Use an http or https dashboard URL.')]),
 }).strict();
@@ -59,7 +59,7 @@ export class NotificationQueue {
         for (const job of this.jobs()) if (job.requestId === request.id && !['accepted', 'sending', 'cancelled'].includes(job.status) && !this.eligible(job, state)) {
           job.status = 'cancelled'; job.error = 'The inventory correction made this notice obsolete.'; this.save(job);
         }
-        if (settings.enabled && request.attention && !request.closedAt && request.practice === false && !request.attention.sample && ['buyer', 'scanner'].includes(request.attention.source)) {
+        if (settings.enabled && request.attention && !request.closedAt && request.practice === false && !request.attention.sample && ['buyer', 'scanner', 'phone'].includes(request.attention.source)) {
           const hours = settings.reminderHours * 3600000;
           const latest = this.jobs().filter(j => j.partId === request.partId && j.status === 'accepted').reduce((last, j) => Math.max(last, j.acceptedAt ?? j.createdAt), 0);
           this.schedule({ id: request.attention.id, requestId: request.id, partId: request.partId, nextReminderAt: Math.max(now + hours, latest + hours), correctionCooldown: true });
@@ -81,7 +81,7 @@ export class NotificationQueue {
     const settings = this.settings(); const units = quantityToBuy(state, part);
     const prefix = kind === 'escalation' ? 'Both bins empty' : kind === 'reminder' ? 'Reminder: refill needed' : 'Refill needed';
     const demand = units > 0 ? `At ${new Date(snapshotAt).toISOString()}, ${units} additional ${part.unit} remained uncovered.` : `At ${new Date(snapshotAt).toISOString()}, replenishment was already covered by received stock or incoming purchases. Zero additional purchase needed. Confirm receipt and physically refill the empty bins.`;
-    return { from: sender, to: [settings.recipient], subject: `BYU Racing · ${prefix} · ${part.name}`,
+    return { from: sender, to: buyerRecipients(settings), subject: `BYU Racing · ${prefix} · ${part.name}`,
       text: `${prefix}: ${part.name}\nSpecification: ${part.specification}\nLocation: ${part.location}\n${part.bins.every(b => b.status === 'empty') ? 'Both bins were empty at this snapshot.' : 'One bin was empty at this snapshot. Use the other bin.'}\n${demand}\nTarget per bin: ${part.binQuantity} ${part.unit}\nSupplier: ${part.supplier || 'Not assigned'}${part.supplierUrl ? `\nProduct: ${part.supplierUrl}` : ''}${settings.dashboardUrl ? `\nDashboard: ${settings.dashboardUrl}` : ''}\n\nCheck the current dashboard before purchasing. Purchases and carrier updates do not refill physical bins.` };
   }
   // Called within InventoryStore's stock transaction. Never calls an external service.
@@ -97,7 +97,7 @@ export class NotificationQueue {
     for (const alert of state.alerts.filter(a => !ids.has(a.id))) {
       const request = state.requests.find(r => r.id === alert.requestId);
       const attention = request?.attention;
-      if (!request || !attention || attention.sample || !['buyer', 'scanner'].includes(attention.source) || !alert.episodeId) continue;
+      if (!request || !attention || attention.sample || !['buyer', 'scanner', 'phone'].includes(attention.source) || !alert.episodeId) continue;
       // Sender is bound by the server when enabling, not supplied by stock callers.
       const sender = this.sender();
       if (!sender || !settings.recipient) continue;
@@ -139,13 +139,13 @@ export class NotificationQueue {
         if (!configuration.configured || !configuration.sender || !settings.recipient) throw new DomainError('Configure the server email key, verified sender and recipient first.');
       };
       if (action.type === 'save') {
-        if (action.recipient !== settings.recipient) {
+        if (!sameRecipients(buyerRecipients(action), buyerRecipients(settings))) {
           settings.enabled = false;
           for (const job of this.jobs()) if (job.kind !== 'test' && job.status !== 'accepted' && job.status !== 'sending') { job.status = 'cancelled'; job.error = 'Recipient changed. Pending messages to the previous recipient were cancelled.'; this.save(job); }
           // Do not manufacture reminders for the new recipient from an old episode.
           this.db.exec('DELETE FROM notification_episodes');
         }
-        Object.assign(settings, { recipient: action.recipient, reminderHours: action.reminderHours, dashboardUrl: action.dashboardUrl });
+        Object.assign(settings, { recipient: buyerRecipients(action)[0] ?? '', recipients: buyerRecipients(action), reminderHours: action.reminderHours, dashboardUrl: action.dashboardUrl });
         settings.revision++; message = 'Email settings saved. Recipient changes keep delivery off until you enable it.';
       } else if (action.type === 'set_enabled') {
         if (action.enabled) requireSetup();
@@ -155,7 +155,7 @@ export class NotificationQueue {
         requireSetup();
         const latest = this.jobs().filter(j => j.kind === 'test').at(-1);
         if (latest && now - latest.createdAt < 60_000) throw new DomainError('Wait one minute before sending another test email.', 429);
-        this.enqueue('test', { from: configuration.sender, to: [settings.recipient], subject: testEmailSubject, text: testEmailText }, now);
+        this.enqueue('test', { from: configuration.sender, to: buyerRecipients(settings), subject: testEmailSubject, text: testEmailText }, now);
         message = 'Test email queued to the displayed recipient. This does not change inventory.';
       } else {
         requireSetup();
@@ -163,7 +163,7 @@ export class NotificationQueue {
         if (!old || !['failed', 'needs_review'].includes(old.status) || old.supersededBy) throw new DomainError('This email is not available for retry.', 409);
         if (old.kind !== 'test' && !settings.enabled) throw new DomainError('Enable email alerts before retrying an operational notice.');
         if (old.status === 'needs_review' && !action.confirmDuplicate) throw new DomainError('Review provider history and confirm that retrying may create a duplicate.');
-        if (old.payload.to[0] !== settings.recipient || old.payload.from !== configuration.sender) throw new DomainError('Recipient or sender changed. This old message cannot be retried to a different address.');
+        if (!sameRecipients(old.payload.to, buyerRecipients(settings)) || old.payload.from !== configuration.sender) throw new DomainError('Recipient or sender changed. This old message cannot be retried to a different address.');
         const replacement = this.enqueue(old.kind, old.payload, now, { requestId: old.requestId, partId: old.partId, episodeId: old.episodeId, alertId: old.alertId });
         old.supersededBy = replacement.id; this.save(old);
         message = 'A new delivery attempt is queued. The original email history is preserved.';
@@ -178,7 +178,7 @@ export class NotificationQueue {
     const request = state.requests.find(r => r.id === job.requestId && !r.closedAt);
     const part = state.parts.find(p => p.id === job.partId);
     const episode = request?.attention;
-    if (!request || request.practice !== false || !part || part.sample || part.practice !== false || !episode || episode.sample || episode.id !== job.episodeId || !['buyer', 'scanner'].includes(episode.source)) return false;
+    if (!request || request.practice !== false || !part || part.sample || part.practice !== false || !episode || episode.sample || episode.id !== job.episodeId || !['buyer', 'scanner', 'phone'].includes(episode.source)) return false;
     return job.kind === 'escalation' ? part.bins.every(b => b.status === 'empty') : quantityToBuy(state, part) > 0;
   }
   private reminders(now: number, configuration: EmailConfiguration, state: InventoryState) {
@@ -210,7 +210,7 @@ export class NotificationQueue {
           job.claimToken = undefined; job.leaseUntil = undefined; this.save(job);
         }
         if (!['queued', 'retry'].includes(job.status)) continue;
-        if (!this.eligible(job, state) || job.payload.to[0] !== settings.recipient || job.payload.from !== configuration.sender) {
+        if (!this.eligible(job, state) || !sameRecipients(job.payload.to, buyerRecipients(settings)) || job.payload.from !== configuration.sender) {
           job.status = 'cancelled'; job.error = 'This notice is obsolete or its destination changed.'; this.save(job); continue;
         }
         if (job.ambiguous && job.firstAttemptAt !== undefined && now - job.firstAttemptAt >= safeRetryWindow) {

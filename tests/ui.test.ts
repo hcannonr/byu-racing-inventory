@@ -9,6 +9,7 @@ import App from '../src/App.tsx';
 import { TrackingDialog, TrackingSummary } from '../src/components/OrderDialogs.tsx';
 import type { Action } from '../shared/types.ts';
 import { InventoryStore } from '../server/store.ts';
+import { createPublicScanning } from '../server/publicScan.ts';
 import { DomainError } from '../server/domain.ts';
 import { ZodError } from 'zod';
 import { CabinetMap } from '../src/components/CabinetMap.tsx';
@@ -91,51 +92,29 @@ test('a photo confirmed by polling remains successful when its delayed upload re
   assert.equal(store.read().revision, 1);
 });
 
-test('cabinet selections survive polling snapshots and later manual selections override external focus', async () => {
-  store = new InventoryStore(':memory:', false);
-  const state = store.read(); const a = randomUUID(), b = randomUUID();
-  state.cabinetMap = { name: 'Test cabinet', drawers: [{ id: randomUUID(), label: 'Drawer', compartments: [{ id: a, label: 'Left', locations: ['BLUE-A01'] }, { id: b, label: 'Right', locations: ['BLUE-A02'] }] }] };
-  const props = { state, focusedLocation: 'BLUE-A01', busy: false, onPart: () => {}, onSave: async () => true };
-  const view = render(React.createElement(CabinetMap, props)); const user = userEvent.setup();
-  await user.click(screen.getByRole('button', { name: /Right.*BLUE-A02/ }));
-  view.rerender(React.createElement(CabinetMap, { ...props, state: structuredClone(state) }));
-  assert.equal(screen.getByRole('button', { name: /Right.*BLUE-A02/ }).getAttribute('aria-pressed'), 'true');
+test('cabinet shows parts directly in sections and preserves focused location through polling', async () => {
+  store=new InventoryStore(':memory:',false);const state=store.read();
+  state.cabinetMap={name:'Test cabinet',drawers:[{id:randomUUID(),label:'Top drawer',compartments:[{id:randomUUID(),label:'Parts',locations:['BLUE-A01']}]}]};
+  let opened=''; const props={state,focusedLocation:'BLUE-A01',busy:false,onPart:(id:string)=>{opened=id;},onSave:async()=>true};
+  const view=render(React.createElement(CabinetMap,props));const user=userEvent.setup();
+  assert.ok(within(screen.getByRole('region',{name:'Top drawer'})).getByRole('button',{name:/Hex bolts/}));
+  view.rerender(React.createElement(CabinetMap,{...props,state:structuredClone(state)}));
+  assert.ok(screen.getByRole('button',{name:/Hex bolts/}).classList.contains('focused'));
+  await user.click(screen.getByRole('button',{name:/Hex bolts/}));assert.equal(opened,state.parts[0].id);
 });
 
-test('phone cabinet selection focuses its matching parts and provides a return to the diagram', async () => {
-  store = new InventoryStore(':memory:', false); const state = store.read();
-  state.cabinetMap = { name: 'Test cabinet', drawers: [{ id: randomUUID(), label: 'Drawer', compartments: [{ id: randomUUID(), label: 'Metric bolts', locations: ['BLUE-A01'] }] }] };
-  const width = window.innerWidth; Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
-  try {
-    render(React.createElement(CabinetMap, { state, focusedLocation: null, busy: false, onPart: () => {}, onSave: async () => true }));
-    const user = userEvent.setup(); await user.click(screen.getByRole('button', { name: /Metric bolts.*BLUE-A01/ }));
-    await waitFor(() => assert.ok(document.activeElement?.classList.contains('map-parts-panel')));
-    assert.ok(screen.getByRole('button', { name: 'Open Hex bolts' }));
-    await user.click(screen.getByRole('button', { name: 'Back to diagram' }));
-    assert.equal(document.activeElement?.getAttribute('aria-pressed'), 'true');
-  } finally { Object.defineProperty(window, 'innerWidth', { configurable: true, value: width }); }
-});
-
-test('cabinet diagram starts unconfigured, saves assigned drawers and highlights a location', async () => {
-  const user = await setup();
-  await user.click(screen.getByRole('button', { name: /More/ }));
-  await user.click(screen.getByRole('button', { name: 'Cabinet map' }));
-  await screen.findByText('No cabinet layout yet.');
-  await user.click(screen.getByRole('button', { name: 'Configure diagram' }));
-  const editor = within(screen.getByRole('dialog', { name: 'Edit cabinet diagram' }));
-  await user.click(editor.getByRole('button', { name: 'Add drawer' }));
-  await user.selectOptions(editor.getByLabelText('Add location to Compartment 1'), 'BLUE-A01');
-  await user.click(editor.getByRole('button', { name: 'Save diagram' }));
-  await waitFor(() => assert.equal(store.read().cabinetMap?.drawers[0].compartments[0].locations[0], 'BLUE-A01'));
-  assert.equal(store.read().parts[0].bins[0].id, 'BLUE-A01-1');
-  await user.click(screen.getByRole('button', { name: 'Inventory' }));
-  await user.click(screen.getByRole('button', { name: 'Locate Hex bolts in cabinet' }));
-  const compartment = await screen.findByRole('button', { name: /Compartment 1.*BLUE-A01/ });
-  assert.equal(compartment.getAttribute('aria-pressed'), 'true');
-  await user.click(screen.getByRole('button', { name: 'Open Hex bolts' }));
-  const detail = within(screen.getByRole('dialog', { name: 'Part overview' }));
-  assert.ok(detail.getByLabelText('Upload part photo'));
-  assert.ok(detail.getByText('No part photo yet.'));
+test('cabinet setup saves sections and locating a part opens it directly', async () => {
+  const user=await setup();await user.click(screen.getByRole('button',{name:/More/}));await user.click(screen.getByRole('button',{name:'Cabinet map'}));
+  assert.ok(screen.getByText('Not assigned to a section'));
+  await user.click(screen.getByRole('button',{name:'Set up cabinet'}));
+  const editor=within(screen.getByRole('dialog',{name:'Set up cabinet'}));
+  await user.clear(editor.getByLabelText('Section 1'));await user.type(editor.getByLabelText('Section 1'),'Top drawer');
+  await user.click(editor.getByRole('button',{name:'Save cabinet'}));
+  await waitFor(()=>assert.equal(store.read().cabinetMap?.drawers[0].label,'Top drawer'));
+  assert.equal(store.read().parts[0].bins[0].id,'BLUE-A01-1');
+  await user.click(screen.getByRole('button',{name:'Inventory'}));await user.click(screen.getByRole('button',{name:'Locate Hex bolts in cabinet'}));
+  const part=await screen.findByRole('button',{name:/Hex bolts.*BLUE-A01/});assert.ok(part.classList.contains('focused'));
+  await user.click(part);assert.ok(screen.getByRole('dialog',{name:'Part overview'}));
 });
 
 const originalFetch = globalThis.fetch;
@@ -146,6 +125,7 @@ async function setup(seed?: (store: InventoryStore) => void, start: 'inventory' 
   seed?.(store);
   globalThis.fetch = async (input, init) => {
     if (String(input) === '/api/state') return Response.json(store.read());
+    if (String(input) === '/api/labels/scan-links') return Response.json(await createPublicScanning(store,'test-only-label-key').links(window.location.origin));
     try {
       if (String(input).startsWith('/api/parts/')) {
         const file = init?.body as File, headers = new Headers(init?.headers);

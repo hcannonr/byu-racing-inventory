@@ -36,7 +36,7 @@ export function InventoryParts({ parts, state, layout, showEmptyGroups = false, 
   const assigned = new Set(state.cabinetMap?.drawers.flatMap(drawer => drawer.compartments.flatMap(compartment => compartment.locations)) ?? []);
   const groups = state.cabinetMap?.drawers.map(drawer => ({ id: drawer.id, label: drawer.label, parts: parts.filter(part => drawer.compartments.some(compartment => compartment.locations.includes(part.location))) })) ?? [];
   const unplaced = parts.filter(part => !assigned.has(part.location));
-  if (groups.length) groups.push({ id: '__unplaced', label: 'Unplaced locations', parts: unplaced });
+  if (state.cabinetMap) groups.push({ id: '__unplaced', label: 'Unplaced locations', parts: unplaced });
   else for (const prefix of [...new Set(parts.map(part => locationSection(part.location)))].sort()) {
     groups.push({ id: prefix, label: prefix === 'Other' ? 'Other locations' : `Locations ${prefix}`, parts: parts.filter(part => (locationSection(part.location)) === prefix) });
   }

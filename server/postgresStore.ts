@@ -10,6 +10,7 @@ import { PostgresNotifications } from './postgresNotifications.ts';
 import { validatePhoto, type ValidatedPhoto } from './media.ts';
 import { normalizeImportIdentity, type ImportSession } from '../shared/orderImport.ts';
 import { z } from 'zod';
+import { pruneMonthlyActivity } from './retention.ts';
 
 export class PostgresStore {
   readonly db: PostgresDb;
@@ -21,6 +22,14 @@ export class PostgresStore {
   async read(): Promise<InventoryState> {
     const row = (await this.db.prepare('SELECT body FROM inventory WHERE id=1').get()) as { body: string };
     return JSON.parse(row.body);
+  }
+  async cleanupActivity(): Promise<void> {
+    await this.db.transaction(async db => {
+      const state = await new PostgresStore(db).read();
+      if (!pruneMonthlyActivity(state, this.clock())) return;
+      await db.prepare('UPDATE inventory SET body=? WHERE id=1').run(JSON.stringify(state));
+      await db.source.query('DELETE FROM racing.audit WHERE at < $1', [new Date(this.clock() - 30 * 86400000).toISOString()]);
+    });
   }
   async execute(input: unknown): Promise<CommandResult> {
     return this.db.transaction(db => new PostgresStore(db, this.clock, this.actor).executeWithPhoto(input));

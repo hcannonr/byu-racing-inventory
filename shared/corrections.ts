@@ -2,7 +2,7 @@ import type { InventoryEvent, InventoryState, EventSnapshot, InventoryEventData,
 
 export const correctionKinds = ['scan', 'receive', 'refill'] as const;
 export function isPracticeSource(provenance?: CommandProvenance) {
-  return !provenance || !['buyer', 'scanner'].includes(provenance.source) || !!provenance.sample;
+  return !provenance || !['buyer', 'scanner', 'phone'].includes(provenance.source) || !!provenance.sample;
 }
 export function eventSnapshot(state: InventoryState, partId: string, requestId?: string, orderId?: string): EventSnapshot {
   const part = state.parts.find(p => p.id === partId);

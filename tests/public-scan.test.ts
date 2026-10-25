@@ -1,0 +1,53 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { PGlite } from '@electric-sql/pglite';
+import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { createDeployedApp } from '../server/deployed.ts';
+import { PostgresDb } from '../server/postgres.ts';
+import { Memberships } from '../server/memberships.ts';
+import type { DeployedConfig } from '../server/config.ts';
+
+test('signed public label scans one bin anonymously while dashboard and other actions stay private', async () => {
+  const config: DeployedConfig = { mode:'deployed', origin:'https://cabinet.example.org', databaseUrl:'test', supabaseUrl:'https://test.supabase.co', publishableKey:'test', secretKey:'test', adminEmail:'admin@example.org', jobSecret:'x'.repeat(32) };
+  const pg = new PGlite(); await pg.exec(await readFile(new URL('../supabase/migrations/202610080001_inventory.sql', import.meta.url), 'utf8'));
+  const db = new PostgresDb(pg), members = new Memberships(db, config.adminEmail);
+  await members.resolve('admin', config.adminEmail); let identity: string | undefined = 'admin';
+  const auth = { session:async()=>identity ? members.get(identity) : undefined, login:async()=>{}, callback:async()=>{}, logout:async()=>{} };
+  const server = createDeployedApp(config, db, auth).listen(0,'127.0.0.1'); await new Promise<void>(r=>server.once('listening',r));
+  const base = `http://127.0.0.1:${(server.address() as any).port}`;
+  const post = (path: string, body: unknown, origin = config.origin) => fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json',Origin:origin,...(identity?{'X-Racing-User-ID':identity}:{})},body:JSON.stringify(body)});
+  const run = async (action: unknown) => { const response = await post('/api/commands',{eventId:randomUUID(),expectedRevision:(await (await fetch(base+'/api/state')).json()).revision,provenance:{source:'buyer'},action}); const body=await response.json(); assert.equal(response.status,200,JSON.stringify(body)); return body.state; };
+  try {
+    const inventory = await run({type:'add_part',part:{name:'Public scan bolt',specification:'M8',category:'Fasteners',location:'PUBLIC-01',supplier:'Private supplier',supplierUrl:'',binQuantity:20,unit:'pieces'}});
+    const binId = inventory.parts[0].bins[0].id, otherId = inventory.parts[0].bins[1].id;
+    const linksResponse = await fetch(base+'/api/labels/scan-links'); assert.equal(linksResponse.status,200);
+    const links = await linksResponse.json(); const url = new URL(links[binId]);
+    assert.equal(url.origin, config.origin); assert.equal(url.search,'');
+    const label = Object.fromEntries(new URLSearchParams(url.hash.slice(1)));
+    assert.equal(label.binId, binId); assert.ok(label.key.length >= 40);
+    identity = undefined;
+    assert.equal((await fetch(base+'/api/state')).status,401);
+    assert.equal((await fetch(base+'/api/labels/scan-links')).status,401);
+    assert.equal((await post('/api/commands',{action:{type:'scan',binId,cycle:0}})).status,401);
+    assert.equal((await post('/api/public-scan/prepare',{...label,key:'z'.repeat(43)})).status,403);
+    assert.equal((await post('/api/public-scan/prepare',{...label,binId:otherId})).status,403);
+    assert.equal((await post('/api/public-scan/prepare',label,'https://evil.example')).status,403);
+    const prepared = await post('/api/public-scan/prepare',label); assert.equal(prepared.status,200);
+    const view = await prepared.json(); assert.equal(view.binId,binId); assert.equal(view.cycle,0);
+    assert.equal(JSON.stringify(view).includes('Private supplier'),false); assert.equal(view.state,undefined);
+    assert.equal((await post('/api/public-scan/complete',{...label,cycle:0,action:{type:'reset'}})).status,400);
+    const saved = await post('/api/public-scan/complete',{...label,cycle:view.cycle}); assert.equal(saved.status,200);
+    assert.equal((await saved.json()).bin.status,'empty');
+    const again = await post('/api/public-scan/complete',{...label,cycle:view.cycle}); assert.equal(again.status,200); assert.equal((await again.json()).changed,false);
+    identity='admin'; const state = await (await fetch(base+'/api/state')).json();
+    assert.equal(state.requests.length,1); assert.equal(state.parts[0].bins[1].status,'in_use'); assert.equal(state.requests[0].practice,false);
+    const ordered = await run({type:'order',requestId:state.requests[0].id,supplier:'Test',reference:'',quantity:20,eta:''});
+    await run({type:'receive',orderId:ordered.orders[0].id,quantity:20}); await run({type:'refill',binId,cycle:0});
+    identity=undefined; const oldRetry=await post('/api/public-scan/complete',{...label,cycle:0});
+    assert.equal(oldRetry.status,200); const oldResult=await oldRetry.json(); assert.equal(oldResult.bin.status,'ready'); assert.equal(oldResult.bin.cycle,1); assert.equal(oldResult.changed,false);
+    const fresh=await post('/api/public-scan/complete',{...label,cycle:1}); assert.equal(fresh.status,200); assert.equal((await fresh.json()).bin.status,'empty');
+    identity='admin'; await run({type:'delete_part',partId:state.parts[0].id}); identity=undefined;
+    assert.equal((await post('/api/public-scan/prepare',label)).status,404);
+  } finally { await new Promise<void>(r=>server.close(()=>r())); await pg.close(); }
+});

@@ -45,7 +45,7 @@ export const commandSchema = z.object({
     z.object({ type: z.literal('attach_photo'), partId: id, photoId: z.uuid(), contentHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
     z.object({ type: z.literal('remove_photo'), partId: id }).strict(),
     z.object({ type: z.literal('save_cabinet_map'), map: cabinetMapSchema }).strict(),
-    z.object({ type: z.literal('save_categories'), categories: z.array(categoryName).min(1).max(100).refine(names => new Set(names.map(name => name.toLowerCase())).size === names.length, 'Category names must be unique.'), assignments: z.array(z.object({ partId: id, category: categoryName }).strict()).max(10000).refine(values => new Set(values.map(value => value.partId)).size === values.length, 'Assign each part once.') }).strict(),
+    z.object({ type: z.literal('save_categories'), categories: z.array(categoryName).max(100).refine(names => new Set(names.map(name => name.toLowerCase())).size === names.length, 'Category names must be unique.'), assignments: z.array(z.object({ partId: id, category: categoryName }).strict()).max(10000).refine(values => new Set(values.map(value => value.partId)).size === values.length, 'Assign each part once.') }).strict(),
     z.object({ type: z.literal('scan'), binId: id, cycle: z.number().int().nonnegative() }).strict(),
     z.object({ type: z.literal('order'), requestId: id, supplier: short.min(1), reference: short, quantity, eta: date, purchasePack: purchaseSnapshot.optional() }).strict().refine(
       line => line.purchasePack?.packs === undefined || line.quantity === line.purchasePack.packs * line.purchasePack.size,
@@ -60,6 +60,7 @@ export const commandSchema = z.object({
     z.object({ type: z.literal('acknowledge'), requestId: id }).strict(),
     z.object({ type: z.literal('read_alert'), alertId: id }).strict(),
     z.object({ type: z.literal('add_part'), part: partSchema }).strict(),
+    z.object({ type: z.literal('delete_part'), partId: id }).strict(),
     z.object({ type: z.literal('edit_part'), partId: id, part: partSchema }).strict(),
     z.object({ type: z.literal('reset'), confirmation: z.literal('RESET DEMO') }).strict(),
   ]),

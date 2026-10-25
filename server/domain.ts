@@ -277,14 +277,27 @@ export function applyCommand(original: InventoryState, command: Command, now = n
       if (alert.read) return noChange('Alert already read.');
       alert.read = true; message = 'Alert marked read.'; break;
     }
+    case 'delete_part': {
+      if (command.expectedRevision === undefined) throw new DomainError('Deleting a part requires the current inventory revision.');
+      const part = state.parts.find(p => p.id === a.partId);
+      if (!part) return noChange('Part already removed.');
+      state.archivedParts = [...(state.archivedParts ?? []), part];
+      state.parts = state.parts.filter(p => p.id !== part.id);
+      for (const request of state.requests) if (request.partId === part.id && !request.closedAt) request.closedAt = now;
+      state.alerts = state.alerts.filter(alert => alert.partId !== part.id);
+      for (const drawer of state.cabinetMap?.drawers ?? []) for (const compartment of drawer.compartments) compartment.locations = compartment.locations.filter(location => location !== part.location);
+      message = `${part.name} removed. Its labels are retired; purchase records are retained.`;
+      event(null, 'catalog', message); break;
+    }
     case 'add_part': {
       if (state.parts.some(p => p.location === a.part.location)) throw new DomainError('This location is already assigned to another part.');
       const id = randomUUID();
+      const binCode = `BIN-${id.replaceAll('-', '').toUpperCase()}`;
       const { purchasePack, ...details } = a.part;
       details.category = registerCategory(details.category);
       state.parts.push({ ...details, ...(purchasePack && { purchasePack }), id, sample: false, practice, bins: [
-        { id: `${a.part.location}-1`, status: 'in_use', cycle: 0 },
-        { id: `${a.part.location}-2`, status: 'ready', cycle: 0 },
+        { id: `${binCode}-1`, status: 'in_use', cycle: 0 },
+        { id: `${binCode}-2`, status: 'ready', cycle: 0 },
       ] });
       message = `${a.part.name} added with two stocked bins.`; event(id, 'catalog', message); break;
     }

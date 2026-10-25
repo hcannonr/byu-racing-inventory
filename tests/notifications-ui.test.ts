@@ -46,7 +46,7 @@ test('buyer can configure a recipient while missing server setup keeps delivery 
   assert.equal(screen.queryByText(/RESEND_API_KEY|INVENTORY_EMAIL_FROM|Sender setup/), null);
   assert.equal(screen.queryByRole('link', { name: /Resend/ }), null);
   assert.equal((screen.getByText('Email settings').closest('details') as HTMLDetailsElement).open, false);
-  assert.equal((screen.getByText('Delivery history').closest('details') as HTMLDetailsElement).open, false);
+  assert.equal(screen.queryByText('Delivery history'), null);
   await user.click(screen.getByText('Email settings'));
   assert.ok(!screen.queryByLabelText('Dashboard URL'), 'Administrator inventory link has no buyer control');
   await user.type(screen.getByLabelText('Recipient email'), 'buyer@example.org');
@@ -61,6 +61,20 @@ test('buyer can configure a recipient while missing server setup keeps delivery 
   assert.equal(dialog.queryByText('From'), null);
   assert.equal((dialog.getByRole('button', { name: 'Send test email' }) as HTMLButtonElement).disabled, true);
   assert.equal(store.notifications.snapshot({ configured: false, sender: '' }).history.length, 0);
+});
+test('saving each buyer adds a separate removable email box and survives refresh', async()=>{
+ const {user,service}=setup();await user.click(screen.getByText('Email settings'));
+ for(const email of ['buyer@example.org','second@example.org']){
+  await user.type(screen.getByLabelText('Recipient email'),email);
+  await user.click(screen.getByRole('button',{name:'Save email settings'}));
+  await screen.findByRole('button',{name:`Remove buyer ${email}`});
+  assert.equal((screen.getByLabelText('Recipient email') as HTMLInputElement).value,'');
+ }
+ assert.deepEqual(service.snapshot().settings.recipients,['buyer@example.org','second@example.org']);
+ await user.click(screen.getByRole('button',{name:'Remove buyer buyer@example.org'}));
+ await user.click(screen.getByRole('button',{name:'Save email settings'}));
+ await waitFor(()=>assert.deepEqual(service.snapshot().settings.recipients,['second@example.org']));
+ assert.equal(screen.queryByText('Scan previews'),null);assert.equal(screen.queryByText('Delivery history'),null);assert.equal(screen.queryByText('How alerts work'),null);
 });
 
 test('test preview requires an explicit send, and an uncertain response retries the same saved email action', async () => {
@@ -82,8 +96,8 @@ test('test preview requires an explicit send, and an uncertain response retries 
   await waitFor(() => assert.equal(service.snapshot().history.length, 1));
   await screen.findByText('Email action already saved.');
   assert.equal(service.snapshot().settings.enabled, true);
-  assert.equal((screen.getByText('Delivery history').closest('details') as HTMLDetailsElement).open, true);
-  assert.ok(screen.getByText('Queued'));
+  assert.equal(screen.queryByText('Delivery history'), null);
+  assert.equal(service.snapshot().history[0].status,'queued');
   await user.click(screen.getByRole('button', { name: 'Pause email alerts' }));
   await screen.findByText(/Email alerts paused/);
   assert.equal(service.snapshot().settings.enabled, false);
@@ -108,10 +122,10 @@ test('delivery review stays collapsed until requested and preserves buyer duplic
     store.notifications.finish(job.id, job.claimToken!, { accepted: false, temporary: false, ambiguous: true, error: 'RESEND_API_KEY fixture diagnostic' }, Date.now());
   });
   const original = service.snapshot().history[0];
-  assert.equal((screen.getByText('Delivery history').closest('details') as HTMLDetailsElement).open, false);
+  assert.equal(screen.queryByText('Delivery history'), null);
   assert.equal(screen.queryByText(/RESEND_API_KEY/), null);
   await user.click(screen.getByRole('button', { name: '1 email needs review' }));
-  assert.equal((screen.getByText('Delivery history').closest('details') as HTMLDetailsElement).open, true);
+  assert.equal(screen.queryByText('Delivery history'), null);
   await user.click(screen.getByRole('button', { name: 'Review retry' }));
   const dialog = within(screen.getByRole('dialog', { name: 'Review email retry' }));
   assert.equal(dialog.queryByText(/RESEND_API_KEY|provider history|sender setup/i), null);
@@ -131,7 +145,7 @@ test('buyer recipient changes preserve the inventory link configured by the admi
   });
   await user.click(screen.getByText('Email settings'));
   assert.ok(!screen.queryByLabelText('Dashboard URL'), 'Administrator inventory link has no buyer control');
-  await user.clear(screen.getByLabelText('Recipient email'));
+  await user.click(screen.getByRole('button', {name:'Remove buyer old@example.org'}));
   await user.type(screen.getByLabelText('Recipient email'), 'new@example.org');
   await user.click(screen.getByRole('button', { name: 'Save email settings' }));
   await waitFor(() => assert.equal(store.notifications.settings().recipient, 'new@example.org'));

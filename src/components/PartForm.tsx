@@ -6,8 +6,8 @@ import { defaultCategories } from '../../shared/organization';
 
 export type RunAction = (action: Action) => Promise<boolean>;
 export function PartForm({ part, categories = defaultCategories, busy, run, onClose }: { part?: Part; categories?: string[]; busy: boolean; run: RunAction; onClose: () => void }) {
-  const [value, setValue] = useState<PartInput>(part ?? { name: '', specification: '', category: categories[0] ?? 'Workshop', location: '', supplier: '', supplierUrl: '', binQuantity: 50, unit: 'pieces' });
-  const [newCategory, setNewCategory] = useState(false);
+  const [value, setValue] = useState<PartInput>(part ?? { name: '', specification: '', category: categories[0] ?? '', location: '', supplier: '', supplierUrl: '', binQuantity: 50, unit: 'pieces' });
+  const [newCategory, setNewCategory] = useState(!part && !categories.length);
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState('');
   const update = (key: keyof PartInput, v: string | number) => setValue(old => ({ ...old, [key]: v }));

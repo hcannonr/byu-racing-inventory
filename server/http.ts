@@ -1,4 +1,6 @@
 import express from 'express';
+import { randomBytes } from 'node:crypto';
+import { createPublicScanning } from './publicScan.ts';
 import { ZodError } from 'zod';
 import { DomainError } from './domain.ts';
 import type { InventoryStore } from './store.ts';
@@ -9,6 +11,7 @@ import { MAX_PHOTO_BYTES, photoTypes } from './media.ts';
 import { OrderExtractionService, importMimeTypes, MAX_IMPORT_BYTES } from './orderExtraction.ts';
 
 export function createApp(store: InventoryStore, tracking?: Ship24Service, notificationService?: NotificationService, importService?: OrderExtractionService) {
+  const publicScanning = createPublicScanning(store, randomBytes(32).toString('hex'));
   const orderImports = importService ?? new OrderExtractionService(store);
   const notifications = notificationService ?? new NotificationService(store, new ResendEmailTransport('', ''));
   const snapshot = () => {
@@ -39,6 +42,9 @@ export function createApp(store: InventoryStore, tracking?: Ship24Service, notif
     next();
   });
   app.use(express.json({ limit: '32kb' }));
+  app.post('/api/public-scan/prepare',async(req,res)=>res.json(await publicScanning.prepare(req.body)));
+  app.post('/api/public-scan/complete',async(req,res)=>{const result=await publicScanning.complete(req.body);queueEmails();res.json(result);});
+  app.get('/api/labels/scan-links',async(req,res)=>res.json(await publicScanning.links(`http://${req.headers.host}`)));
   app.get('/api/auth/session', (_req, res) => res.json({ mode: 'local' }));
   let extractingOrders = 0;
   app.get('/api/order-import/configuration', (_req, res) => res.json(orderImports.configuration));

@@ -1,4 +1,5 @@
 import express from 'express';
+import { createClient } from '@supabase/supabase-js';
 import { z, ZodError } from 'zod';
 import type { Actor } from '../shared/auth.ts';
 import type { DeployedConfig } from './config.ts';
@@ -14,11 +15,13 @@ import { PostgresTracking } from './postgresTracking.ts';
 import { Uploads } from './uploads.ts';
 import { Jobs, validWorkerSecret } from './jobs.ts';
 import { TrackingRequests } from './trackingRequests.ts';
+import { createPublicScanning } from './publicScan.ts';
 
 export function createDeployedApp(config:DeployedConfig,db:PostgresDb,providedAuth?:Authentication,env:NodeJS.ProcessEnv={}) {
  const app=express();app.disable('x-powered-by');
  const members=new Memberships(db,config.adminEmail),auth=providedAuth??createAuthentication(config,members);
  const baseStore=new PostgresStore(db),uploads=new Uploads(db,config);
+ const publicScanning=createPublicScanning(baseStore,config.jobSecret);
  const email=new ResendEmailTransport(env.RESEND_API_KEY??'',env.INVENTORY_EMAIL_FROM??'');
  const extractor=new OpenAIOrderExtractor(env.OPENAI_API_KEY??'',env.OPENAI_ORDER_MODEL??'gpt-5-mini');
  const trackingKey=env.SHIP24_API_KEY??'';
@@ -43,6 +46,8 @@ export function createDeployedApp(config:DeployedConfig,db:PostgresDb,providedAu
  app.get('/api/auth/google',(req,res)=>auth.login(req,res));
  app.get('/api/auth/callback',(req,res)=>auth.callback(req,res));
  app.post('/api/auth/logout',(req,res)=>auth.logout(req,res));
+ app.post('/api/public-scan/prepare',express.json({limit:'2kb'}),async(req,res)=>res.json(await publicScanning.prepare(req.body)));
+ app.post('/api/public-scan/complete',express.json({limit:'2kb'}),async(req,res)=>res.json(await publicScanning.complete(req.body)));
  app.use('/api',async(req,res,next)=>{
   res.locals.actor=approvedActor(await auth.session(req,res));
   const expected=req.get('x-racing-user-id');
@@ -59,6 +64,7 @@ export function createDeployedApp(config:DeployedConfig,db:PostgresDb,providedAu
  };
  const freshBuyer=async(req:express.Request,res:express.Response)=>{const current=approvedActor(await auth.session(req,res));requireBuyer(current);res.locals.actor=current;return current;};
  app.get('/api/state',async(_req,res)=>res.json(await snapshot(res)));
+ app.get('/api/labels/scan-links',async(_req,res)=>{requireBuyer(actor(res));res.json(await publicScanning.links(config.origin));});
  app.get('/api/media/:id',async(req,res)=>{
   const photo=await baseStore.readPhoto(String(req.params.id));if(!photo)return res.status(404).json({error:'Photo not found.'});
   res.type(photo.mime);res.write(Buffer.from(photo.bytes));res.end();
@@ -110,6 +116,16 @@ export function createDeployedApp(config:DeployedConfig,db:PostgresDb,providedAu
   res.status(202).json({message:'Update queued for the next background check, usually within a minute.'});
  });
  app.get('/api/admin/members',async(_req,res)=>{requireAdmin(actor(res));res.json(await members.list());});
+ app.delete('/api/admin/members/:id',async(req,res)=>{
+  requireAdmin(actor(res));
+  const input=z.object({revision:z.number().int().nonnegative()}).strict().parse(req.body);
+  await members.remove(actor(res),String(req.params.id),input.revision,async id=>{
+   const client=createClient(config.supabaseUrl,config.secretKey,{auth:{persistSession:false,autoRefreshToken:false}});
+   const {error}=await client.auth.admin.deleteUser(id);
+   if(error && error.status!==404)throw new DomainError('Account could not be deleted. Try again.',503);
+  });
+  res.json({ok:true});
+ });
  app.post('/api/admin/members/:id',async(req,res)=>{requireAdmin(actor(res));res.json(await members.update(actor(res),String(req.params.id),req.body));});
  app.get('/api/admin/jobs',async(_req,res)=>{requireAdmin(actor(res));res.json((await db.source.query('SELECT id,last_success,last_error FROM racing.jobs')).rows);});
  app.use('/api',(_req,res)=>res.status(404).json({error:'Endpoint not found.'}));

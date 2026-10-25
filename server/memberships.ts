@@ -7,7 +7,25 @@ const changeSchema=z.object({role:z.enum(['member','buyer','admin']),status:z.en
 export class Memberships {
   constructor(readonly db:PostgresDb,readonly adminEmail:string) {}
   async get(id:string):Promise<Member|undefined> { return (await this.db.source.query('SELECT * FROM racing.members WHERE id=$1',[id])).rows[0]; }
-  async list():Promise<Member[]> { return (await this.db.source.query('SELECT * FROM racing.members ORDER BY email')).rows; }
+  async list():Promise<Member[]> { return (await this.db.source.query("SELECT * FROM racing.members WHERE email <> '' ORDER BY email")).rows; }
+  async remove(actor:Actor|Member,id:string,revision:number,deleteIdentity:(id:string)=>Promise<void>):Promise<void> {
+    z.number().int().nonnegative().parse(revision);
+    await this.db.transaction(async db=>{
+      const current=(await db.source.query('SELECT * FROM racing.members WHERE id=$1',['userId' in actor?actor.userId:actor.id])).rows[0];
+      requireAdmin(approvedActor(current));
+      const old=(await db.source.query('SELECT * FROM racing.members WHERE id=$1',[id])).rows[0];
+      if(!old || !old.email)return;
+      if(old.revision!==revision)throw new DomainError('Membership changed. Refresh before deleting.',409);
+      if(old.role==='admin'&&old.status==='approved') {
+        const admins=(await db.source.query("SELECT id FROM racing.members WHERE role='admin' AND status='approved'")).rows;
+        if(admins.length<=1)throw new DomainError('The last active admin cannot be removed.',409);
+      }
+      await deleteIdentity(id);
+      // Retain only a denied identity marker so an old session cannot recreate access.
+      await db.source.query("UPDATE racing.members SET email='',role='member',status='revoked',revision=revision+1 WHERE id=$1",[id]);
+      await db.source.query('INSERT INTO racing.audit(actor,action) VALUES($1,$2)',[current.id,JSON.stringify({type:'delete-member',id})]);
+    });
+  }
   async resolve(id:string,email:string):Promise<Member> {
     return this.db.transaction(async db=>{
       const existing=(await db.source.query('SELECT * FROM racing.members WHERE id=$1',[id])).rows[0];
@@ -26,7 +44,7 @@ export class Memberships {
       const current=(await db.source.query('SELECT * FROM racing.members WHERE id=$1',['userId' in actor?actor.userId:actor.id])).rows[0];
       requireAdmin(approvedActor(current));
       const old=(await db.source.query('SELECT * FROM racing.members WHERE id=$1',[id])).rows[0];
-      if(!old)throw new DomainError('Member not found.',404);
+      if(!old || !old.email)throw new DomainError('Member not found.',404);
       if(old.revision!==change.revision)throw new DomainError('Membership changed. Refresh before saving.',409);
       if(old.role==='admin'&&old.status==='approved'&&(change.role!=='admin'||change.status!=='approved')) {
         const admins=(await db.source.query("SELECT id FROM racing.members WHERE role='admin' AND status='approved'")).rows;

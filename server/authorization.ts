@@ -11,5 +11,5 @@ export function authorizeCommand(actor: Actor, input: any) {
   if(input?.action?.type==='reset') throw new DomainError('Demo reset is disabled in production.',403);
   if(input?.provenance?.source==='scanner') throw new DomainError('Trusted scanner access is not available through the browser.',403);
   if(input?.action?.type!=='scan') requireBuyer(actor);
-  if(input?.action?.type==='scan' && input?.provenance?.source!=='simulator') throw new DomainError('Use the practice scan simulator.',403);
+  if(input?.action?.type==='scan' && !['simulator','phone'].includes(input?.provenance?.source)) throw new DomainError('Use a phone QR label or the practice scan simulator.',403);
 }

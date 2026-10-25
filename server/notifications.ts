@@ -13,6 +13,7 @@ export class NotificationService {
     return this.running;
   }
   private async deliver() {
+    this.store.cleanupActivity();
     // Bound each pass, giving scans and other local requests time between batches.
     for (let count = 0; count < 20; count++) {
       const job = this.store.notifications.claim(this.clock(), this.configuration);

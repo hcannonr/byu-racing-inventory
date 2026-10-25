@@ -47,6 +47,8 @@ export interface AlertPreview {
   createdAt: string; read: boolean; delivery: 'preview';
 }
 export interface InventoryState {
+  archivedParts?: Part[];
+  activityCleanedAt?: string;
   categories?: string[];
   cabinetMap?: CabinetMap;
   notifications?: import('./notifications.ts').NotificationSnapshot;
@@ -76,9 +78,10 @@ export type Action =
   | { type: 'acknowledge'; requestId: string }
   | { type: 'read_alert'; alertId: string }
   | { type: 'add_part'; part: PartInput }
+  | { type: 'delete_part'; partId: string }
   | { type: 'edit_part'; partId: string; part: PartInput }
   | { type: 'reset'; confirmation: 'RESET DEMO' };
-export const commandSources = ['demo', 'seed', 'simulator', 'buyer', 'scanner'] as const;
+export const commandSources = ['demo', 'seed', 'simulator', 'buyer', 'scanner', 'phone'] as const;
 export type CommandSource = typeof commandSources[number];
 export interface CommandProvenance { source: CommandSource; sample?: boolean; stationId?: string }
 export interface AttentionEpisode {

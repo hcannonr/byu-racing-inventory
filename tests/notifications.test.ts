@@ -12,6 +12,16 @@ import { ResendEmailTransport } from '../server/emailTransport.ts';
 import type { Action } from '../shared/types.ts';
 
 const configuration = { configured: true, sender: 'Cabinet <alerts@example.org>' };
+test('phone scans of operational parts queue one alert while sample scans stay isolated', () => {
+  const f = fixture();
+  try {
+    f.scan(1, 'phone'); f.scan(1, 'phone');
+    assert.equal(f.history().length, 1);
+    assert.equal(f.store.read().requests.find(r => r.partId === f.store.read().parts.find(p => p.location === 'REAL-A1')!.id)!.practice, false);
+    f.store.execute({ eventId: randomUUID(), provenance: { source: 'phone' }, action: { type: 'scan', binId: 'BLUE-A01-1', cycle: 0 } });
+    assert.equal(f.history().length, 1);
+  } finally { f.store.close(); }
+});
 function fixture(path = ':memory:', initiallyEnabled = true) {
   let now = Date.parse('2026-10-05T12:00:00Z');
   const store = new InventoryStore(path, false, () => now);
@@ -20,7 +30,7 @@ function fixture(path = ':memory:', initiallyEnabled = true) {
   settings({ type: 'save', recipient: 'buyer@example.org', reminderHours: 24, dashboardUrl: '' });
   if (initiallyEnabled) settings({ type: 'set_enabled', enabled: true });
   run({ type: 'add_part', part: { name: 'Verified bolt', specification: 'M8', category: 'Fasteners', location: 'REAL-A1', supplier: 'Workshop supply', supplierUrl: '', binQuantity: 50, unit: 'pieces' } });
-  const scan = (bin = 1, source = 'scanner', eventId = randomUUID()) => store.execute({ eventId, provenance: { source }, action: { type: 'scan', binId: `REAL-A1-${bin}`, cycle: 0 } });
+  const scan = (bin = 1, source = 'scanner', eventId = randomUUID()) => store.execute({ eventId, provenance: { source }, action: { type: 'scan', binId: store.read().parts.find(p=>p.location==='REAL-A1')!.bins[bin-1].id, cycle: 0 } });
   const history = () => store.notifications.snapshot(configuration).history;
   return { store, run, settings, scan, history, advance: (ms: number) => { now += ms; }, now: () => now };
 }
@@ -278,8 +288,8 @@ test('completing a practice request does not turn simulated physical stock into 
   const requestId = f.store.read().requests.at(-1)!.id;
   f.run({ type: 'order', requestId, supplier: 'S', quantity: 50, reference: '', eta: '' });
   f.run({ type: 'receive', orderId: f.store.read().orders.at(-1)!.id, quantity: 50 });
-  f.run({ type: 'refill', binId: 'REAL-A1-1', cycle: 0 });
-  f.store.execute({ eventId: randomUUID(), provenance: { source: 'scanner' }, action: { type: 'scan', binId: 'REAL-A1-1', cycle: 1 } });
+  f.run({ type: 'refill', binId: f.store.read().parts.at(-1)!.bins[0].id, cycle: 0 });
+  f.store.execute({ eventId: randomUUID(), provenance: { source: 'scanner' }, action: { type: 'scan', binId: f.store.read().parts.at(-1)!.bins[0].id, cycle: 1 } });
   assert.equal(f.history().length, 0);
   assert.equal(f.store.read().parts.at(-1)!.practice, true);
   f.store.close();
@@ -289,13 +299,13 @@ test('operational scans keep their provenance and escalate into a fresh attentio
   const store = new InventoryStore(':memory:', false);
   const run = (action: unknown) => store.execute({ eventId: randomUUID(), provenance: { source: 'scanner' }, action });
   run({ type: 'add_part', part: { name: 'Verified bolt', specification: 'M8', category: 'Fasteners', location: 'REAL-A1', supplier: '', supplierUrl: '', binQuantity: 50, unit: 'pieces' } });
-  run({ type: 'scan', binId: 'REAL-A1-1', cycle: 0 });
+  run({ type: 'scan', binId: store.read().parts.at(-1)!.bins[0].id, cycle: 0 });
   const initial = store.read().requests.at(-1)!;
   assert.equal(initial.attention?.source, 'scanner');
   assert.equal(initial.attention?.sample, false);
   run({ type: 'acknowledge', requestId: initial.id });
   assert.ok(store.read().requests.at(-1)!.attention?.snoozedUntil);
-  run({ type: 'scan', binId: 'REAL-A1-2', cycle: 0 });
+  run({ type: 'scan', binId: store.read().parts.at(-1)!.bins[1].id, cycle: 0 });
   const urgent = store.read().requests.at(-1)!;
   assert.notEqual(urgent.attention?.id, initial.attention?.id);
   assert.equal(urgent.attention?.urgent, true);

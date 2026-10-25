@@ -48,7 +48,7 @@ export function binSizingSuggestion(state: InventoryState, partId: string): BinS
     if (!afterEpoch(e)) { exclude('before_measurement_change'); continue; }
     if (!e.data || e.data.version !== 1) { exclude('legacy'); continue; }
     if (correctedEvents.has(e.id) || e.data.correction || e.data.requestId && correctedRequests.has(e.data.requestId)) { exclude('corrected_period'); continue; }
-    if (!e.provenance || !['buyer', 'scanner'].includes(e.provenance.source)) { exclude(e.provenance ? 'practice' : 'unknown_provenance'); continue; }
+    if (!e.provenance || !['buyer', 'scanner', 'phone'].includes(e.provenance.source)) { exclude(e.provenance ? 'practice' : 'unknown_provenance'); continue; }
     if (part.sample || part.practice !== false || e.sample !== false || e.provenance.sample || !clean(e.data.before) || !clean(e.data.after)) { exclude('practice'); continue; }
     if (!Number.isSafeInteger(e.data.revision) || e.data.revision < 1 || !e.data.commandId || !Number.isFinite(time(e.at))
       || !e.data.after.part || measurement(e.data.after.part) !== measurement({ capacity: part.binQuantity, unit: part.unit, specification: part.specification })) { exclude('invalid_history'); continue; }

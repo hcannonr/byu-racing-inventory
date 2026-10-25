@@ -16,6 +16,7 @@ export class Jobs {
   if(!claimed)return {running:true};
   const valid=async()=>!!(await this.db.source.query("SELECT id FROM racing.jobs WHERE id='worker' AND token=$1 AND lease_until>$2",[token,Date.now()])).rows.length;
   try {
+   await new PostgresStore(this.db).cleanupActivity();
    const q=new PostgresStore(this.db).notifications;
    for(let i=0;i<20&&Date.now()-now<60000&&await valid();i++) {
     const job=await q.claim(Date.now(),this.transport.configuration);if(!job)break;

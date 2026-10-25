@@ -8,6 +8,7 @@ import { NotificationQueue } from './notificationQueue.ts';
 import { validatePhoto, type ValidatedPhoto } from './media.ts';
 import { normalizeImportIdentity, type ImportSession } from '../shared/orderImport.ts';
 import { z } from 'zod';
+import { pruneMonthlyActivity } from './retention.ts';
 
 export class InventoryStore {
   private db: DatabaseSync;
@@ -35,6 +36,14 @@ export class InventoryStore {
   }
   execute(input: unknown): CommandResult {
     return this.executeWithPhoto(input);
+  }
+  cleanupActivity(): void {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const state = this.read();
+      if (pruneMonthlyActivity(state, this.clock())) this.db.prepare('UPDATE inventory SET body=? WHERE id=1').run(JSON.stringify(state));
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   registerOrderImport(input: unknown): void {
     const session = z.object({ id: z.uuid(), sourceHash: z.string().regex(/^[a-f0-9]{64}$/), sourceKind: z.enum(['text', 'pdf', 'image']), model: z.string().min(1).max(100), lineIds: z.array(z.string().regex(/^line-(?:[1-9][0-9]?|100)$/)).min(1).max(100), createdAt: z.number().int().nonnegative() }).strict().parse(input);

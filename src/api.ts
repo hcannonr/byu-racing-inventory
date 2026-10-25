@@ -52,6 +52,7 @@ async function request<T>(path: string, options?: RequestInit, timeout = 10000):
   const result=await response.json();fence();return result;
 }
 export const getState = () => request<InventoryState>('/api/state');
+export const getScanLinks = () => request<Record<string,string>>('/api/labels/scan-links');
 export const getOrderImportConfiguration = () => request<OrderImportConfiguration>('/api/order-import/configuration');
 const extractLocal = (source: File | string) => request<OrderImportDraft>('/api/order-import/extract', {
   method: 'POST', headers: { 'Content-Type': typeof source === 'string' ? 'text/plain; charset=utf-8' : source.type || (/\.pdf$/i.test(source.name) ? 'application/pdf' : 'application/octet-stream') }, body: source,

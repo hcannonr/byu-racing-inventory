@@ -10,6 +10,22 @@ import { seedState } from '../server/seed.ts';
 import type { Action } from '../shared/types.ts';
 
 afterEach(cleanup);
+test('sections and categories can be removed without deleting their parts',async()=>{
+ const state=seedState(),user=userEvent.setup();let saved:Action|undefined;
+ const view=render(React.createElement(CabinetSetup,{state,busy:false,onSave:async action=>{saved=action;return true;},onClose:()=>{}}));
+ await user.click(screen.getByRole('button',{name:'Remove section Locations A'}));
+ assert.equal((screen.getByRole('combobox',{name:'Section for Hex bolts'}) as HTMLSelectElement).value,'');
+ await user.click(screen.getByRole('button',{name:'Save cabinet'}));
+ assert.equal(saved?.type,'save_cabinet_map');if(saved?.type==='save_cabinet_map')assert.equal(saved.map.drawers.length,2);
+ view.unmount();
+ render(React.createElement(CategorySetup,{state,busy:false,onSave:async action=>{saved=action;return true;},onClose:()=>{}}));
+ await user.click(screen.getByRole('button',{name:'Remove category Fasteners'}));
+ await user.click(screen.getByRole('button',{name:'Save categories'}));
+ assert.equal(saved?.type,'save_categories');if(saved?.type==='save_categories'){
+  assert.ok(!saved.categories.includes('Fasteners'));
+  assert.ok(saved.assignments.some(a=>a.partId===state.parts[0].id&&a.category==='Electrical'));
+ }
+});
 test('cabinet setup renames section headings and moves parts while preserving existing compartments and bin codes', async () => {
   const state=seedState(), user=userEvent.setup(); let saved: Action | undefined;
   render(React.createElement(CabinetSetup,{state,busy:false,onSave:async action=>{saved=action;return true;},onClose:()=>{}}));

@@ -406,3 +406,37 @@ body {background:#f1f4f8}
   .app-shell {padding-bottom:0}
 }
 
+
+/* Content-sized inventory cards and a straightforward cabinet list. */
+.inventory-cards {grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),340px));align-items:start;justify-content:start}
+.inventory-part {align-self:start}
+.inventory-category-rows {max-width:960px;width:100%;justify-self:start}
+.inventory-cabinet {grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),360px));justify-content:start}
+.setup-name-row {display:flex;gap:8px;align-items:end;min-width:0}
+.setup-name-row>label {flex:1;min-width:0}.setup-name-row .icon-button {flex-shrink:0;margin-bottom:5px}
+.danger-text {color:#a02525}
+.simple-cabinet {max-width:1100px;margin:0 auto}
+.simple-cabinet-sections {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:20px}
+.simple-cabinet-section {background:#fff;border:1px solid var(--border);border-radius:12px;padding:20px;align-self:start}
+.simple-cabinet-section header {display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.simple-cabinet-section header span {font-size:12px;color:var(--muted)}
+.cabinet-part-link {display:flex;align-items:center;gap:12px;text-align:left;width:100%;padding:16px 0;background:transparent;border:0;border-top:1px solid var(--border);color:var(--navy);cursor:pointer}
+.cabinet-part-link>span:first-child {flex:1;min-width:0}.cabinet-part-link strong {overflow-wrap:anywhere}.cabinet-part-link small {display:block;color:var(--muted);margin-top:5px}
+.cabinet-part-link.focused {outline:2px solid var(--navy);outline-offset:5px}
+.buyer-email-chips {display:flex;flex-wrap:wrap;gap:8px;min-width:0}
+.buyer-email-chip {display:inline-flex;align-items:center;gap:8px;padding:9px 12px;background:#edf2f8;border:1px solid #c8d4e2;border-radius:7px;font-size:14px;overflow-wrap:anywhere;max-width:100%}
+.buyer-email-chip button {border:0;background:transparent;cursor:pointer;font-size:20px;min-width:28px;min-height:28px;color:inherit}
+@media(max-width:680px){.inventory-cards,.inventory-cabinet{grid-template-columns:minmax(0,1fr)}}
+
+.phone-scan {min-height:85dvh;padding:28px 16px;display:grid;place-items:start center}
+.phone-scan-card {width:100%;max-width:480px;box-sizing:border-box;padding:28px;background:#fff;border:1px solid var(--border);border-radius:16px;display:flex;flex-direction:column;gap:18px;overflow-wrap:anywhere}
+.phone-scan-card>.team-logo {align-self:flex-start}
+.phone-scan-card h1 {font-size:36px;line-height:1.08;margin:0}
+.phone-scan-card h2 {font-size:23px;margin:0}
+.phone-scan-card p {margin:0;line-height:1.5}
+.phone-scan-part {display:flex;flex-direction:column;gap:9px;padding:20px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.phone-scan-part code {font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.phone-scan-note {font-size:13px;color:var(--muted)}
+.phone-scan-result {padding:16px;background:#edf7f1;border:1px solid #bbd9c7;border-radius:9px}
+.phone-scan-result p {margin-top:7px}
+.phone-scan-card>.button {width:100%;min-height:52px;justify-content:center}

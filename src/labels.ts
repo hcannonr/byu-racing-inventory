@@ -7,11 +7,12 @@ export interface BinLabel { part: Part; bin: Bin; letter: 'A' | 'B'; number: 1 |
 export const paperSizes = { letter: { width: 215.9, height: 279.4, title: 'Letter' }, a4: { width: 210, height: 297, title: 'A4' } };
 export const mmToPx = (mm: number) => mm * 96 / 25.4;
 
-/** The ID is the entire payload. Physical identity never includes mutable role/cycle. */
-export function makeLabelCode(id: string, format: LabelFormat) {
+/** QR opens the automatic phone scan; Code 128 retains the raw hardware ID. Neither encodes a refill cycle. */
+export function makeLabelCode(id: string, format: LabelFormat, origin = window.location.origin, scanLink?: string) {
   const qr = format === 'qr';
+  const url = new URL('/', origin); url.searchParams.set('scan', id);
   const raw = qr
-    ? qrcode({ bcid: 'qrcode', text: id, scale: 4, padding: 8, backgroundcolor: 'FFFFFF' }, drawingSVG())
+    ? qrcode({ bcid: 'qrcode', text: scanLink ?? url.href, scale: 4, padding: 8, backgroundcolor: 'FFFFFF' }, drawingSVG())
     : code128({ bcid: 'code128', text: id, scale: 3, height: 12, paddingwidth: 12, paddingheight: 4, backgroundcolor: 'FFFFFF' }, drawingSVG());
   const widthMm = qr ? 26 : 176, heightMm = qr ? 26 : 24;
   // Vector geometry remains crisp on print; quiet zones are inside the SVG viewBox.

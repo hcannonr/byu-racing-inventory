@@ -37,7 +37,7 @@ test('buyer reviews bin roles and confirms a reason and physical check before co
   await user.click(dialog.getByRole('button', { name: 'Save correction' })); await waitFor(() => assert.equal(store.read().parts[0].bins[0].status, 'in_use'));
   assert.deepEqual(store.read().events.find(e => e.id === original.id), original); assert.ok(screen.getByText('Corrected')); assert.equal(store.read().events.filter(e => e.kind === 'correction').length, 1);
   await user.click(screen.getByRole('button', { name: /More/ })); await user.click(screen.getByRole('button', { name: /Buyer alerts/ }));
-  assert.ok(await screen.findByText('Superseded by correction'));
+  assert.equal(screen.queryByText('Scan previews'),null);
   assert.equal(store.read().alerts[0].read, false, 'the original preview remains unchanged');
 });
 

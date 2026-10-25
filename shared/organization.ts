@@ -9,8 +9,8 @@ export function locationSection(location: string): string {
   return location.replace(/^BLUE-/, '').match(/^[A-Za-z]+/)?.[0] ?? 'Other';
 }
 export function initialCabinetSetup(state: InventoryState): CabinetMap {
-  if (state.cabinetMap?.drawers.length) return structuredClone(state.cabinetMap);
-  return { name: state.cabinetMap?.name ?? 'Blue cabinet', drawers: [...new Set(state.parts.map(part => locationSection(part.location)))].sort().map(prefix => ({
+  if (state.cabinetMap) return structuredClone(state.cabinetMap);
+  return { name: 'Blue cabinet', drawers: [...new Set(state.parts.map(part => locationSection(part.location)))].sort().map(prefix => ({
     id: crypto.randomUUID(), label: prefix === 'Other' ? 'Other locations' : `Locations ${prefix}`,
     compartments: [{ id: crypto.randomUUID(), label: 'Parts', locations: state.parts.filter(part => locationSection(part.location) === prefix).map(part => part.location) }],
   })) };
