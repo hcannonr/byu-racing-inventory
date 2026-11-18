@@ -1,13 +1,11 @@
 {
-  "name": "byu-racing-inventory",
+  "name": "byu-racing-inventory-v2",
   "private": true,
-  "version": "0.1.0",
+  "version": "2.0.0",
   "type": "module",
-  "engines": {
-    "node": "22.x"
-  },
   "scripts": {
     "dev": "tsx server/index.ts",
+    "dev:phone": "tsx server/index.ts --phone",
     "build": "tsc --noEmit -p tsconfig.build.json && vite build",
     "start": "tsx server/index.ts --production",
     "test": "tsx --test tests/*.test.ts",
@@ -23,25 +21,21 @@
     "lucide-react": "^1.52.0",
     "pg": "^8.23.1",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "sharp": "^0.35.5",
-    "zod": "^4.6.5"
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
-    "@testing-library/react": "^16.3.3",
-    "@testing-library/user-event": "^14.6.7",
     "@types/express": "^5.0.6",
-    "@types/jsdom": "^30.0.0",
     "@types/node": "^26.6.4",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "jsdom": "^30.1.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.2",
-    "zxing-wasm": "^3.1.4"
+    "vite": "^8.3.2"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }

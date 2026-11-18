@@ -1,20 +1,14 @@
 import express from 'express';
-import { readRuntimeConfig } from '../server/config.ts';
-import { createDatabase, PostgresDb } from '../server/postgres.ts';
-import { createDeployedApp } from '../server/deployed.ts';
-import { createReviewPreviewApp, reviewPreviewEnabled } from '../server/reviewPreview.ts';
+import { createLiveApp, readLiveConfig } from '../server/live.ts';
+
 let app: ReturnType<typeof express>;
 try {
-  if (reviewPreviewEnabled(process.env)) {
-    app = createReviewPreviewApp();
-  } else {
-  const config = readRuntimeConfig({ ...process.env, INVENTORY_MODE: 'deployed' });
-  if (config.mode !== 'deployed') throw new Error('Deployed configuration required.');
-  app = createDeployedApp(config, new PostgresDb(createDatabase(config.databaseUrl)), undefined, process.env);
-  }
-} catch {
-  // Deployment remains closed to all inventory access until its secrets are configured.
+  app = createLiveApp(readLiveConfig(process.env));
+} catch (error) {
+  // Missing settings: stay closed instead of running half-configured.
+  // Names the setting (e.g. "SUPABASE_URL is required."), never its value. Shows in Vercel → Logs.
+  console.error(`Inventory setup incomplete: ${error instanceof Error ? error.message : 'unknown error'} See DEPLOY.md.`);
   app = express();
-  app.use((_req, res) => res.status(503).set('Cache-Control', 'no-store').json({ error: 'Club sign-in is being configured. Please check back shortly.' }));
+  app.use((_req, res) => { res.status(503).set('Cache-Control', 'no-store').json({ error: 'The shop inventory is being set up. Check back shortly.' }); });
 }
 export default app;
