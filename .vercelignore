@@ -12,14 +12,11 @@
 !package.json
 !package-lock.json
 !tsconfig.json
+!tsconfig.build.json
 !vite.config.ts
 !index.html
 !vercel.json
-!tsconfig.build.json
 .env*
-**/*.sqlite*
 **/*.log
-.implementation/**
 data/**
 tests/**
-projects/**

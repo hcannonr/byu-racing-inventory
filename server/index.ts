@@ -1,57 +1,46 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { parseEnv } from 'node:util';
+import { readFileSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
-import { InventoryStore } from './store.ts';
-import { createApp } from './http.ts';
-import { Ship24Service } from './ship24.ts';
-import { NotificationService } from './notifications.ts';
-import { ResendEmailTransport } from './emailTransport.ts';
-import { OpenAIOrderExtractor, OrderExtractionService } from './orderExtraction.ts';
+import { FileStore } from './store.ts';
+import { demoMailer } from './mailer.ts';
+import { createApi } from './http.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const dataPath = process.env.INVENTORY_DB || join(root, 'data', 'inventory.sqlite');
-mkdirSync(dirname(dataPath), { recursive: true });
-const store = new InventoryStore(dataPath);
-// Read only the tracking credential, never inject unrelated workspace secrets into Vite.
-const envPaths = [join(root, '.env'), join(root, '../../../.env')];
-const trackingKey = process.env.SHIP24_API_KEY ?? envPaths.filter(existsSync).map(path => parseEnv(readFileSync(path, 'utf8')).SHIP24_API_KEY).find(Boolean) ?? '';
-const tracking = new Ship24Service(store, trackingKey.trim());
-// Credentials remain server-only. Only these explicitly named values are selected.
-const emailEnv = envPaths.filter(existsSync).map(path => parseEnv(readFileSync(path, 'utf8')));
-const emailKey = process.env.RESEND_API_KEY ?? emailEnv.map(values => values.RESEND_API_KEY).find(Boolean) ?? '';
-const emailFrom = process.env.INVENTORY_EMAIL_FROM ?? emailEnv.map(values => values.INVENTORY_EMAIL_FROM).find(Boolean) ?? '';
-const notifications = new NotificationService(store, new ResendEmailTransport(emailKey.trim(), emailFrom.trim()));
-const importKey = process.env.OPENAI_API_KEY ?? emailEnv.map(values => values.OPENAI_API_KEY).find(Boolean) ?? '';
-const importModel = process.env.OPENAI_ORDER_MODEL ?? emailEnv.map(values => values.OPENAI_ORDER_MODEL).find(Boolean) ?? 'gpt-5-mini';
-const orderImports = new OrderExtractionService(store, new OpenAIOrderExtractor(importKey.trim(), importModel));
-const app = createApp(store, tracking, notifications, orderImports);
-const syncEmails = () => { void notifications.sync().catch(() => console.error('Email queue processing failed. Pending work is preserved.')); };
-const emailTimer = setInterval(syncEmails, 15_000); emailTimer.unref(); syncEmails();
-const syncTracking = () => { void tracking.sync().catch(() => console.error('Shipment tracking sync failed.')); };
-const trackingTimer = setInterval(syncTracking, 60_000);
-trackingTimer.unref();
-syncTracking();
 const production = process.argv.includes('--production');
-const port = Number(process.env.PORT || 4317);
+// --phone listens on the local Wi-Fi so a real phone can scan labels. Off by default.
+const phone = process.argv.includes('--phone') || process.env.PHONE === '1';
+const port = Number(process.env.PORT || 4330);
+const host = phone ? '0.0.0.0' : '127.0.0.1';
+const store = new FileStore(process.env.INVENTORY_FILE || join(root, 'data', 'inventory.json'));
+
+function lanAddress() {
+  for (const list of Object.values(networkInterfaces())) {
+    for (const net of list ?? []) if (net.family === 'IPv4' && !net.internal && /^(192\.168|10\.|172\.(1[6-9]|2\d|3[01]))/.test(net.address)) return net.address;
+  }
+  return null;
+}
+const lan = phone ? lanAddress() : null;
+const scanOrigin = () => lan ? `http://${lan}:${port}` : '';
+
+const app = express();
+app.use('/api', createApi({ store, mailer: demoMailer, scanOrigin }));
+
 if (production) {
   app.use(express.static(join(root, 'dist')));
   app.get('/{*path}', (_req, res) => res.sendFile(join(root, 'dist', 'index.html')));
 } else {
-  const vite = await createViteServer({ root, server: { middlewareMode: true, hmr: { port: port + 1, host: '127.0.0.1' } }, appType: 'custom' });
+  const { createServer } = await import('vite');
+  const vite = await createServer({ root, server: { middlewareMode: true, hmr: { port: port + 1 } }, appType: 'custom' });
   app.use(vite.middlewares);
   app.get('/{*path}', async (req, res, next) => {
-    try {
-      const html = await vite.transformIndexHtml(req.originalUrl, readFileSync(join(root, 'index.html'), 'utf8'));
-      res.type('html').send(html);
-    } catch (error) { next(error); }
+    try { res.type('html').send(await vite.transformIndexHtml(req.originalUrl, readFileSync(join(root, 'index.html'), 'utf8'))); }
+    catch (error) { next(error); }
   });
 }
-const server = app.listen(port, '127.0.0.1', () => {
-  console.log(`BYU Racing inventory: http://127.0.0.1:${port}`);
-  console.log(`Local inventory app. Scanner simulated. Email: ${notifications.snapshot().mode}. Data: ${dataPath}`);
+
+app.listen(port, host, () => {
+  console.log(`BYU Racing shop inventory: http://127.0.0.1:${port}`);
+  if (lan) console.log(`Phones on the same Wi-Fi can scan labels at http://${lan}:${port}`);
 });
-server.on('error', error => { console.error(error.message); store.close(); process.exit(1); });
-for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { clearInterval(trackingTimer); clearInterval(emailTimer); server.close(() => { store.close(); process.exit(0); }); });

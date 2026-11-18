@@ -1,181 +1,65 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { InventoryStore } from '../server/store.ts';
-import { activeRequest, quantityToBuy, type Action } from '../shared/types.ts';
+import { seedState } from '../server/seed.ts';
+import { addGroup, addPart, deleteGroup, deletePart, setStatus, undo, UserError } from '../server/domain.ts';
 
-function fixture() {
-  const store = new InventoryStore(':memory:', false);
-  const part = store.read().parts[0];
-  const run = (action: Action, eventId = randomUUID()) => store.execute({ eventId, action });
-  const scan = (index: number) => run({ type: 'scan', binId: part.bins[index].id, cycle: 0 });
-  return { store, part, run, scan };
-}
+const stocked = () => { const s = seedState(); return { s, part: s.parts.find(p => p.status === 'stocked')! }; };
 
-test('one empty-bin scan rotates the reserve and creates one request and alert', () => {
-  const { store, part, scan } = fixture();
-  scan(0);
-  const s = store.read();
-  assert.deepEqual(s.parts[0].bins.map(b => b.status), ['empty', 'in_use']);
-  assert.equal(s.requests.length, 1);
-  assert.equal(s.alerts.length, 1);
-  assert.equal(s.requests[0].partId, part.id);
-  scan(0);
-  assert.equal(store.read().requests.length, 1);
-  assert.equal(store.read().alerts.length, 1);
-  store.close();
+test('one bin: scan flags low, order, then restock goes back to stocked', () => {
+  const { s, part } = stocked();
+  assert.equal(setStatus(s, part.id, 'low', { scanned: true }).changed, true);
+  assert.equal(part.status, 'low');
+  setStatus(s, part.id, 'ordered', { note: 'Order #1' });
+  assert.equal(part.status, 'ordered'); assert.equal(part.orderNote, 'Order #1');
+  setStatus(s, part.id, 'stocked');
+  assert.equal(part.status, 'stocked'); assert.equal(part.orderNote, undefined);
+  assert.deepEqual(s.events.slice(0, 3).map(e => e.kind), ['restocked', 'ordered', 'scanned']);
 });
 
-test('second bin depletion escalates the existing request without ordering', () => {
-  const { store, scan } = fixture(); scan(0); scan(1);
-  assert.equal(store.read().requests.length, 1);
-  assert.equal(store.read().orders.length, 0);
-  assert.match(store.read().alerts[1].title, /Out of stock/);
-  store.close();
+test('scanning twice is harmless, and scanning an ordered part changes nothing', () => {
+  const { s, part } = stocked();
+  setStatus(s, part.id, 'low', { scanned: true });
+  const count = s.events.length;
+  assert.equal(setStatus(s, part.id, 'low', { scanned: true }).changed, false);
+  setStatus(s, part.id, 'ordered');
+  assert.equal(setStatus(s, part.id, 'low', { scanned: true }).changed, false);
+  assert.equal(part.status, 'ordered');
+  assert.equal(s.events.length, count + 1);
 });
 
-test('partial receipts and ordering never mark a bin stocked; refill requires sufficient received units', () => {
-  const { store, part, run, scan } = fixture(); scan(0);
-  const requestId = store.read().requests[0].id;
-  run({ type: 'order', requestId, supplier: 'Test supplier', reference: 'PO-1', quantity: 50, eta: '' });
-  const orderId = store.read().orders[0].id;
-  run({ type: 'ship', orderId });
-  run({ type: 'receive', orderId, quantity: 20 });
-  assert.equal(store.read().parts[0].bins[0].status, 'empty');
-  assert.throws(() => run({ type: 'refill', binId: part.bins[0].id, cycle: 0 }), /received/);
-  run({ type: 'receive', orderId, quantity: 30 });
-  assert.equal(store.read().parts[0].bins[0].status, 'empty');
-  run({ type: 'refill', binId: part.bins[0].id, cycle: 0 });
-  assert.deepEqual(store.read().parts[0].bins.map(b => b.status), ['ready', 'in_use']);
-  assert.equal(activeRequest(store.read(), part.id), undefined);
-  assert.equal(store.read().parts[0].bins[0].cycle, 1);
-  store.close();
+test('undo restores the previous status only while it is the latest change', () => {
+  const { s, part } = stocked();
+  const first = setStatus(s, part.id, 'low', { scanned: true }).event!;
+  const second = setStatus(s, part.id, 'ordered').event!;
+  assert.throws(() => undo(s, first.id), UserError);
+  undo(s, second.id);
+  assert.equal(part.status, 'low');
+  undo(s, first.id);
+  assert.equal(part.status, 'stocked');
 });
 
-test('late retry and stale cycle cannot empty a newly refilled bin', () => {
-  const { store, part, run } = fixture();
-  const eventId = randomUUID();
-  const action: Action = { type: 'scan', binId: part.bins[0].id, cycle: 0 };
-  run(action, eventId);
-  run({ type: 'order', requestId: store.read().requests[0].id, supplier: 'Supplier', reference: '', quantity: 50, eta: '' });
-  run({ type: 'receive', orderId: store.read().orders[0].id, quantity: 50 });
-  run({ type: 'refill', binId: part.bins[0].id, cycle: 0 });
-  assert.equal(run(action, eventId).changed, false);
-  assert.throws(() => run(action), /cycle/);
-  assert.equal(store.read().parts[0].bins[0].status, 'ready');
-  store.close();
+test('adding a part needs a name, a real team, and a real storage spot', () => {
+  const s = seedState();
+  assert.throws(() => addPart(s, { name: '', teamId: 'electrical', cabinetId: 'blue', orderQty: 5 }), /name/);
+  assert.throws(() => addPart(s, { name: 'X', teamId: 'nope', cabinetId: 'blue', orderQty: 5 }), /team/);
+  const part = addPart(s, { name: 'Hex bolts', teamId: 'electrical', cabinetId: 'blue', orderQty: 5, link: 'mcmaster.com' });
+  assert.equal(part.status, 'stocked');
+  assert.equal(part.link, 'https://mcmaster.com');
+  assert.notEqual(part.id, s.parts.find(p => p.name === 'Hex bolts' && p !== part)?.id);
 });
 
-test('restoring both empty bins needs enough receipts and leaves one working bin', () => {
-  const { store, part, run, scan } = fixture(); scan(0); scan(1);
-  const requestId = store.read().requests[0].id;
-  run({ type: 'order', requestId, supplier: 'Supplier', reference: '', quantity: 100, eta: '' });
-  run({ type: 'receive', orderId: store.read().orders[0].id, quantity: 50 });
-  run({ type: 'refill', binId: part.bins[0].id, cycle: 0 });
-  assert.equal(store.read().requests[0].closedAt, null);
-  assert.throws(() => run({ type: 'refill', binId: part.bins[1].id, cycle: 0 }), /received/);
-  run({ type: 'receive', orderId: store.read().orders[0].id, quantity: 50 });
-  run({ type: 'refill', binId: part.bins[1].id, cycle: 0 });
-  assert.deepEqual(store.read().parts[0].bins.map(b => b.status), ['in_use', 'ready']);
-  assert.ok(store.read().requests[0].closedAt);
-  store.close();
+test('teams and storage spots in use cannot be deleted; empty ones can', () => {
+  const s = seedState();
+  assert.throws(() => deleteGroup(s, 'teams', 'electrical'), /Move its/);
+  const aero = addGroup(s, 'teams', { name: 'Aero' });
+  assert.throws(() => addGroup(s, 'teams', { name: 'aero' }), /already exists/);
+  deleteGroup(s, 'teams', aero.id);
+  assert.equal(s.teams.some(t => t.id === aero.id), false);
 });
 
-test('rejects invalid quantities, over-receipts and unknown bins without changing state', () => {
-  const { store, run, scan } = fixture(); scan(0);
-  const requestId = store.read().requests[0].id;
-  assert.throws(() => run({ type: 'order', requestId, supplier: 'S', reference: '', quantity: -1, eta: '' }));
-  run({ type: 'order', requestId, supplier: 'S', reference: '', quantity: 50, eta: '' });
-  const before = store.read();
-  assert.throws(() => run({ type: 'receive', orderId: before.orders[0].id, quantity: 51 }), /remaining/);
-  assert.throws(() => run({ type: 'scan', binId: 'UNKNOWN', cycle: 0 }), /Unknown/);
-  assert.deepEqual(store.read(), before);
-  store.close();
-});
-
-test('stale buyer revision conflicts and event IDs cannot be reused for another action', () => {
-  const { store, part, run } = fixture();
-  const eventId = randomUUID();
-  run({ type: 'scan', binId: part.bins[0].id, cycle: 0 }, eventId);
-  assert.throws(() => store.execute({ eventId: randomUUID(), expectedRevision: 0, action: { type: 'acknowledge', requestId: store.read().requests[0].id } }), /changed/);
-  assert.throws(() => run({ type: 'scan', binId: part.bins[1].id, cycle: 0 }, eventId), /reused/);
-  store.close();
-});
-
-test('SQLite state and idempotency records survive closing and reopening', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'racing-test-'));
-  try {
-    const path = join(dir, 'inventory.sqlite');
-    let store = new InventoryStore(path, false);
-    const action: Action = { type: 'scan', binId: store.read().parts[0].bins[0].id, cycle: 0 };
-    const eventId = randomUUID();
-    store.execute({ eventId, action }); store.close();
-    store = new InventoryStore(path, false);
-    assert.equal(store.read().parts[0].bins[0].status, 'empty');
-    assert.equal(store.execute({ eventId, action }).changed, false);
-    assert.equal(store.read().requests.length, 1); store.close();
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-test('surplus received units remain available for the next replenishment cycle', () => {
-  const { store, part, run, scan } = fixture(); scan(0);
-  run({ type: 'order', requestId: store.read().requests[0].id, supplier: 'Supplier', reference: '', quantity: 100, eta: '' });
-  run({ type: 'receive', orderId: store.read().orders[0].id, quantity: 100 });
-  run({ type: 'refill', binId: part.bins[0].id, cycle: 0 });
-  scan(1);
-  run({ type: 'refill', binId: part.bins[1].id, cycle: 0 });
-  assert.equal(store.read().requests.filter(r => !r.closedAt).length, 0);
-  assert.equal(store.read().orders.length, 1);
-  store.close();
-});
-
-test('old refill confirmation cannot refill a bin emptied in a later cycle', () => {
-  const { store, part, run, scan } = fixture(); scan(0); scan(1);
-  run({ type: 'order', requestId: store.read().requests[0].id, supplier: 'Supplier', reference: '', quantity: 150, eta: '' });
-  run({ type: 'receive', orderId: store.read().orders[0].id, quantity: 100 });
-  run({ type: 'refill', binId: part.bins[0].id, cycle: 0 });
-  run({ type: 'scan', binId: part.bins[0].id, cycle: 1 });
-  assert.throws(() => run({ type: 'refill', binId: part.bins[0].id, cycle: 0 }), /cycle/);
-  assert.equal(store.read().parts[0].bins[0].status, 'empty');
-  store.close();
-});
-
-
-test('undoing a mistaken purchase restores demand, keeps history, and cannot be replayed into an active purchase', () => {
-  const { store, part, run, scan } = fixture(); scan(0);
-  const purchaseId = randomUUID();
-  const action: Action = { type: 'order', requestId: store.read().requests[0].id, supplier: 'S', reference: 'Mistake', quantity: 50, eta: '' };
-  run(action, purchaseId);
-  const orderId = store.read().orders[0].id;
-  assert.equal(quantityToBuy(store.read(), store.read().parts[0]), 0);
-  run({ type: 'undo_purchase', orderId });
-  assert.ok(store.read().orders[0].voidedAt);
-  assert.equal(quantityToBuy(store.read(), store.read().parts[0]), 50);
-  assert.equal(store.read().parts[0].bins[0].status, 'empty');
-  assert.equal(run({ type: 'undo_purchase', orderId }).changed, false);
-  run(action, purchaseId);
-  assert.ok(store.read().orders[0].voidedAt);
-  assert.throws(() => run({ type: 'receive', orderId, quantity: 1 }), /undone/);
-  assert.throws(() => run({ type: 'ship', orderId }), /undone/);
-  assert.equal(store.read().events.filter(e => e.kind === 'undo_purchase').length, 1);
-  store.close();
-});
-
-test('received purchases cannot be undone; tracking never changes stock or delivery state', () => {
-  const { store, run, scan } = fixture(); scan(0);
-  run({ type: 'order', requestId: store.read().requests[0].id, supplier: 'S', reference: '', quantity: 50, eta: '' });
-  const orderId = store.read().orders[0].id;
-  run({ type: 'save_tracking', orderId, tracking: { carrier: 'UPS', number: '1ZTEST123', url: '' } });
-  assert.equal(store.read().orders[0].tracking?.number, '1ZTEST123');
-  assert.equal(store.read().orders[0].status, 'ordered');
-  assert.equal(store.read().orders[0].received, 0);
-  assert.equal(store.read().parts[0].bins[0].status, 'empty');
-  assert.throws(() => run({ type: 'save_tracking', orderId, tracking: { carrier: 'Other', number: '123', url: 'javascript:alert(1)' } }));
-  run({ type: 'receive', orderId, quantity: 1 });
-  assert.throws(() => run({ type: 'undo_purchase', orderId }), /received/);
-  assert.equal(store.read().orders[0].voidedAt, undefined);
-  store.close();
+test('removing a part logs it and takes it off the list', () => {
+  const s = seedState(); const id = s.parts[0].id;
+  deletePart(s, id);
+  assert.equal(s.parts.some(p => p.id === id), false);
+  assert.equal(s.events[0].kind, 'deleted');
 });

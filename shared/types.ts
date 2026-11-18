@@ -1,153 +1,116 @@
-export type BinStatus = 'in_use' | 'ready' | 'empty';
-export type Category = string;
-export interface Bin { id: string; status: BinStatus; cycle: number }
-export interface PurchasePack { size: number; priceCents?: number }
-export interface PurchasePackSnapshot extends PurchasePack { packs?: number }
-export interface PurchaseBatchLine { requestId: string; quantity: number; purchasePack?: PurchasePackSnapshot; importLine?: import('./orderImport.ts').ImportLineReview }
-export interface PurchaseBatchAction {
-  type: 'order_batch'; supplier: string; reference: string; eta: string; lines: PurchaseBatchLine[]; orderImport?: import('./orderImport.ts').ImportReview;
-}
+/** One bin per part. Stocked -> (scan) Low -> Ordered -> Restocked (back to Stocked). */
+export type PartStatus = 'stocked' | 'low' | 'ordered';
+
+export interface Team { id: string; name: string; color: string }
+export interface Cabinet { id: string; name: string; color: string }
+
 export interface Part {
-  photoId?: string;
-  practice?: boolean;
-  purchasePack?: PurchasePack;
-  id: string; name: string; specification: string; category: Category;
-  location: string; supplier: string; supplierUrl: string; binQuantity: number;
-  unit: string; sample: boolean; bins: [Bin, Bin];
+  id: string;
+  name: string;
+  detail: string;          // size / spec, e.g. "M6 x 20 mm"
+  teamId: string;
+  cabinetId: string;
+  spot: string;            // drawer or shelf, e.g. "Drawer 3"
+  orderQty: number;        // how many to buy when it runs low
+  supplier: string;
+  link: string;
+  photo?: string;          // small data URL
+  status: PartStatus;
+  statusAt: string;        // when the current status started
+  orderNote?: string;      // e.g. order number or "arrives Friday"
+  createdAt: string;
 }
-export const carriers = ['UPS', 'FedEx', 'USPS', 'DHL', 'Other'] as const;
-export interface PackageTracking { carrier: typeof carriers[number]; number: string; url: string; live?: boolean }
-export interface DeliveryUpdate {
-  status: string; trackerId?: string; checkedAt?: string; eventAt?: string; eta?: string;
-  error?: string; events: { id: string; message: string; at: string }[];
+
+export type EventKind = 'scanned' | 'marked_low' | 'ordered' | 'restocked' | 'added' | 'edited' | 'deleted';
+export interface ActivityEvent {
+  id: string; partId: string; partName: string; kind: EventKind; at: string;
+  before?: Pick<Part, 'status' | 'statusAt' | 'orderNote'>;
+  note?: string;
 }
-export interface PurchaseOrder {
-  orderImport?: import('./orderImport.ts').PurchaseImportSnapshot;
-  purchaseGroupId?: string; purchasePack?: PurchasePackSnapshot;
-  delivery?: DeliveryUpdate;
-  voidedAt?: string; tracking?: PackageTracking;
-  id: string; requestId: string; supplier: string; reference: string;
-  quantity: number; received: number; eta: string; createdAt: string;
-  status: 'ordered' | 'in_transit' | 'arrived';
+
+/** Shared shop-wide team. Every lead and member can work on General parts. It can't be deleted. */
+export const GENERAL = 'general';
+
+export type Role = 'admin' | 'lead' | 'member';
+export interface User {
+  id: string; name: string; email: string; role: Role;
+  teamId: string;          // '' for admins (they cover every team)
+  status: 'pending' | 'active';
+  requestedAt: string; approvedAt?: string;
 }
-export interface RefillRequest {
-  practice?: boolean;
-  attention?: AttentionEpisode;
-  id: string; partId: string; createdAt: string; closedAt: string | null;
-  allocated: number; acknowledged: boolean;
-}
-export interface InventoryEvent {
-  data?: InventoryEventData;
-  provenance?: CommandProvenance; sample?: boolean;
-  id: string; partId: string | null; kind: string; message: string; at: string;
-}
-export interface AlertPreview {
-  provenance?: CommandProvenance; sample?: boolean; episodeId?: string; kind?: 'initial' | 'escalation';
-  id: string; requestId: string; partId: string; title: string; body: string;
-  createdAt: string; read: boolean; delivery: 'preview';
-}
-export interface InventoryState {
-  archivedParts?: Part[];
-  activityCleanedAt?: string;
-  categories?: string[];
-  cabinetMap?: CabinetMap;
-  notifications?: import('./notifications.ts').NotificationSnapshot;
-  trackingService?: { configured: boolean; intervalMinutes: number };
-  schemaVersion: 1; revision: number; parts: Part[]; requests: RefillRequest[];
-  orders: PurchaseOrder[]; events: InventoryEvent[]; alerts: AlertPreview[];
-}
-export interface PartInput {
-  purchasePack?: PurchasePack | null;
-  name: string; specification: string; category: Category; location: string;
-  supplier: string; supplierUrl: string; binQuantity: number; unit: string;
-}
-export type Action =
-  | CorrectionAction
-  | { type: 'attach_photo'; partId: string; photoId: string; contentHash: string }
-  | { type: 'remove_photo'; partId: string }
-  | { type: 'save_cabinet_map'; map: CabinetMap }
-  | { type: 'save_categories'; categories: string[]; assignments: { partId: string; category: string }[] }
-  | { type: 'scan'; binId: string; cycle: number }
-  | { type: 'order'; requestId: string; supplier: string; reference: string; quantity: number; eta: string; purchasePack?: PurchasePackSnapshot }
-  | PurchaseBatchAction
-  | { type: 'undo_purchase'; orderId: string }
-  | { type: 'save_tracking'; orderId: string; tracking: PackageTracking }
-  | { type: 'ship'; orderId: string }
-  | { type: 'receive'; orderId: string; quantity: number }
-  | { type: 'refill'; binId: string; cycle: number }
-  | { type: 'acknowledge'; requestId: string }
-  | { type: 'read_alert'; alertId: string }
-  | { type: 'add_part'; part: PartInput }
-  | { type: 'delete_part'; partId: string }
-  | { type: 'edit_part'; partId: string; part: PartInput }
-  | { type: 'reset'; confirmation: 'RESET DEMO' };
-export const commandSources = ['demo', 'seed', 'simulator', 'buyer', 'scanner', 'phone'] as const;
-export type CommandSource = typeof commandSources[number];
-export interface CommandProvenance { source: CommandSource; sample?: boolean; stationId?: string }
-export interface AttentionEpisode {
-  id: string; source: CommandSource; sample: boolean; urgent: boolean;
-  createdAt: string; snoozedUntil?: string;
-}
-export interface Command { eventId: string; expectedRevision?: number; provenance?: CommandProvenance; action: Action }
-export interface CommandResult { state: InventoryState; message: string; changed: boolean }
-export interface EventSnapshot {
-  part: { sample: boolean; practice?: boolean; capacity: number; unit: string; specification: string; bins: [Bin, Bin] } | null;
-  request: { id: string; createdAt: string; allocated: number; closedAt: string | null; practice?: boolean; attention?: AttentionEpisode } | null;
-  order?: { id: string; createdAt: string; quantity: number; received: number; status: PurchaseOrder['status']; voidedAt?: string } | null;
-}
-export interface EventCorrection {
-  targetEventId: string; reason: string; operation: 'undo_scan' | 'set_receipt_quantity' | 'undo_refill';
-  correctedQuantity?: number; physicalOutcome?: 'not_refilled' | 'returned_unused';
-}
-export interface InventoryEventData {
-  version: 1; commandId: string; revision: number; actionType: Action['type'];
-  binId?: string; requestId?: string; orderId?: string; quantity?: number;
-  before: EventSnapshot; after: EventSnapshot; correction?: EventCorrection;
-}
-export type CorrectionAction =
-  | { type: 'correct_scan'; targetEventId: string; reason: string; physicallyConfirmed: true }
-  | { type: 'correct_receipt'; targetEventId: string; reason: string; physicallyConfirmed: true; quantity: number }
-  | { type: 'correct_refill'; targetEventId: string; reason: string; physicallyConfirmed: true; physicalOutcome: 'not_refilled' | 'returned_unused' };
-export interface CabinetCompartment { id: string; label: string; locations: string[] }
-export interface CabinetDrawer { id: string; label: string; compartments: CabinetCompartment[] }
-export interface CabinetMap { name: string; drawers: CabinetDrawer[] }
-export type RequestStatus = 'needs_order' | 'ordered' | 'in_transit' | 'partial' | 'arrived' | 'closed';
-export function activeRequest(state: InventoryState, partId: string) {
-  return state.requests.find(r => r.partId === partId && !r.closedAt);
-}
-export function requestOrders(state: InventoryState, requestId: string) {
-  return state.orders.filter(o => o.requestId === requestId && !o.voidedAt);
-}
-export function availableReceived(state: InventoryState, requestId: string) {
-  const r = state.requests.find(r => r.id === requestId);
-  if (!r) return 0;
-  const requests = state.requests.filter(candidate => candidate.partId === r.partId);
-  const ids = new Set(requests.map(candidate => candidate.id));
-  return state.orders.filter(o => ids.has(o.requestId) && !o.voidedAt).reduce((n, o) => n + o.received, 0)
-    - requests.reduce((n, candidate) => n + candidate.allocated, 0);
-}
-export function requestStatus(state: InventoryState, request: RefillRequest): RequestStatus {
-  if (request.closedAt) return 'closed';
-  const orders = requestOrders(state, request.id);
-  const part = state.parts.find(p => p.id === request.partId)!;
-  if (!orders.length) return availableReceived(state, request.id) >= part.binQuantity ? 'arrived' : 'needs_order';
-  const pending = orders.filter(o => o.received < o.quantity);
-  if (!pending.length) {
-    return availableReceived(state, request.id) >= part.binQuantity ? 'arrived' : 'needs_order';
-  }
-  if (orders.some(o => o.received > 0)) return 'partial';
-  return pending.some(o => o.status === 'in_transit' || ['in_transit', 'out_for_delivery', 'delivered'].includes(o.delivery?.status ?? '')) ? 'in_transit' : 'ordered';
-}
-export const statusLabels: Record<RequestStatus, string> = {
-  needs_order: 'Needs order', ordered: 'Ordered', in_transit: 'In transit',
-  partial: 'Partial delivery', arrived: 'Ready to refill', closed: 'Closed',
+export const roleLabel: Record<Role, string> = { admin: 'Admin', lead: 'Team lead', member: 'Member' };
+export const roleHelp: Record<Role, string> = {
+  admin: 'Sees every team. Manages people, teams, storage, and buyer alerts.',
+  lead: 'Adds and updates parts for their team and General. Approves people who ask to join their team.',
+  member: 'Adds and updates parts for their team and General.',
 };
 
-/** Uncovered refill units, excluding receipts on hand and purchases still due. */
-export function quantityToBuy(state: InventoryState, part: Part): number {
-  const request = activeRequest(state, part.id);
-  if (!request) return 0;
-  const emptyTarget = part.bins.filter(bin => bin.status === 'empty').length * part.binQuantity;
-  const incoming = requestOrders(state, request.id).reduce((sum, order) => sum + order.quantity - order.received, 0);
-  return Math.max(0, emptyTarget - availableReceived(state, request.id) - incoming);
+/** Ordering and restocking belong to admins (the business team). Everyone else sees the board read-only. */
+export const canOrder = (user: Pick<User, 'role'>) => user.role === 'admin';
+
+/** Can this person see and change parts that belong to this team? */
+export function canWorkOn(user: Pick<User, 'role' | 'teamId'>, teamId: string) {
+  return user.role === 'admin' || teamId === GENERAL || teamId === user.teamId;
+}
+
+/** queued: waiting to send. sending: claimed by a server. demo: local build, never sent. not_set_up: live, but no email provider yet. */
+export type EmailStatus = 'queued' | 'sending' | 'sent' | 'failed' | 'demo' | 'not_set_up';
+export interface EmailLog { id: string; at: string; kind: 'low' | 'test' | 'digest'; to: string[]; subject: string; body: string; status?: EmailStatus; error?: string; claimedAt?: string }
+export interface AlertSettings {
+  enabled: boolean;
+  recipients: string[];                 // business team emails
+  timing: 'instant' | 'daily';          // each low bin right away, or one morning summary
+  outbox: EmailLog[];                   // every buyer email, newest first, with its delivery status
+  lastDigest?: string;                  // YYYY-MM-DD (shop time) of the last morning summary
+}
+
+export interface InventoryState { teams: Team[]; cabinets: Cabinet[]; parts: Part[]; events: ActivityEvent[]; users: User[]; alerts: AlertSettings }
+/** What the server sends a signed-in person: only what their role allows. */
+export interface ViewState extends Omit<InventoryState, 'alerts'> {
+  me: User; alerts: AlertSettings | null;
+  mode: 'demo' | 'live';                 // demo: local build with the account switcher. live: Google sign-in.
+  scanKeys: Record<string, string>;      // live: secret code printed on each label so links can't be guessed
+  emailReady: boolean;                   // live: an email provider is configured
+}
+
+export const statusLabel: Record<PartStatus, string> = { stocked: 'Stocked', low: 'Low', ordered: 'Ordered' };
+
+export const eventText: Record<EventKind, string> = {
+  scanned: 'scanned low', marked_low: 'marked low', ordered: 'ordered', restocked: 'restocked',
+  added: 'added', edited: 'edited', deleted: 'removed',
+};
+
+export const palette = ['#c42e48', '#1f6feb', '#d97706', '#16a34a', '#7c3aed', '#0891b2', '#64748b', '#db2777'];
+
+export interface PartInput {
+  name: string; detail: string; teamId: string; cabinetId: string; spot: string;
+  orderQty: number; supplier: string; link: string; photo?: string;
+}
+
+export function cleanPartInput(raw: unknown): PartInput | string {
+  if (!raw || typeof raw !== 'object') return 'Missing part details.';
+  const r = raw as Record<string, unknown>;
+  const text = (key: string, max = 120) => typeof r[key] === 'string' ? (r[key] as string).trim().slice(0, max) : '';
+  const name = text('name');
+  if (!name) return 'Give the part a name.';
+  const qty = Math.round(Number(r.orderQty));
+  if (!Number.isFinite(qty) || qty < 1 || qty > 100000) return 'Order amount must be a number above zero.';
+  const photo = typeof r.photo === 'string' && r.photo.startsWith('data:image/') && r.photo.length < 400_000 ? r.photo : undefined;
+  let link = text('link', 500);
+  if (link && !/^https?:\/\//i.test(link)) link = `https://${link}`;
+  return { name, detail: text('detail'), teamId: text('teamId', 60), cabinetId: text('cabinetId', 60), spot: text('spot', 40), orderQty: qty, supplier: text('supplier', 80), link, photo };
+}
+
+export function daysSince(iso: string, now = Date.now()) {
+  return Math.floor((now - new Date(iso).getTime()) / 86_400_000);
+}
+
+export function timeAgo(iso: string, now = Date.now()) {
+  const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  if (s < 45) return 'just now';
+  const m = Math.round(s / 60); if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60); if (h < 24) return `${h} hr ago`;
+  const d = Math.round(h / 24); if (d === 1) return 'yesterday';
+  if (d < 7) return `${d} days ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }

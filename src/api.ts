@@ -1,130 +1,69 @@
-import type { Action, Command, CommandResult, InventoryState } from '../shared/types';
-import type { NotificationCommand, NotificationSnapshot } from '../shared/notifications';
-import type { OrderImportConfiguration, OrderImportDraft } from '../shared/orderImport';
+import type { AlertSettings, Part, PartInput, PartStatus, Role, Team, Cabinet, User, ViewState } from '../shared/types';
 
-let apiMode: 'local' | 'deployed' = 'local';
-let identity = 'local';
-let generation=0;
-export function setApiIdentity(mode: 'local' | 'deployed', userId?: string) { const next=mode==='local'?'local':userId??'anonymous';if(next!==identity||mode!==apiMode)generation++;apiMode = mode; identity = next; }
-export function accountFence(){const started=generation;return()=>{if(started!==generation)throw new ApiError('Account changed. Reload before continuing.',401);};}
-export function accountHeaders():Record<string,string>{return apiMode==='deployed'?{'X-Racing-User-ID':identity}:{};}
-const storageKey = (key: string) => identity === 'local' ? key : key + ':' + identity;
-export type TodayLayout = 'groups' | 'focus';
-export function readTodayLayout(): TodayLayout {
-  try { return window.localStorage.getItem(storageKey('racing-today-layout')) === 'focus' ? 'focus' : 'groups'; }
-  catch { return 'groups'; }
-}
-export function persistTodayLayout(layout: TodayLayout) {
-  try { window.localStorage.setItem(storageKey('racing-today-layout'), layout); }
-  catch { /* Layout switching still works when browser storage is unavailable. */ }
-}
-export type InventoryLayout = 'cards' | 'cabinet' | 'category';
-export function readInventoryLayout(): InventoryLayout {
-  try { const value = window.localStorage.getItem(storageKey('racing-inventory-layout')); return value === 'cabinet' || value === 'category' ? value : 'cards'; }
-  catch { return 'cards'; }
-}
-export function persistInventoryLayout(layout: InventoryLayout) {
-  try { window.localStorage.setItem(storageKey('racing-inventory-layout'), layout); }
-  catch { /* Keep the current view usable when browser storage is unavailable. */ }
-}
-export class ApiError extends Error { constructor(message: string, public status: number) { super(message); } }
-export function readPendingCommand(): Command | null {
-  try { return JSON.parse(window.sessionStorage.getItem(storageKey('racing-pending-command')) || 'null'); } catch { return null; }
-}
-export function persistPendingCommand(command: Command | null) {
+/** Demo sign-in: which sample account this browser is using. */
+const USER_KEY = 'demo-user';
+export function currentUserId() { try { return localStorage.getItem(USER_KEY) ?? ''; } catch { return ''; } }
+export function switchUser(id: string) { try { localStorage.setItem(USER_KEY, id); } catch { /* private mode */ } }
+export interface Account { id: string; name: string; role: Role; teamId: string }
+export interface Session { mode: 'demo' | 'live'; status: 'active' | 'signed_out' | 'new' | 'pending'; email?: string; name?: string; teams?: Team[]; providers?: { google: boolean; microsoft: boolean; email: boolean } }
+/** The secret code on a live label (?k=...), passed along with scans. */
+const withKey = (path: string, k?: string | null) => k ? `${path}?k=${encodeURIComponent(k)}` : path;
+
+async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  let res: Response;
   try {
-    if (command) window.sessionStorage.setItem(storageKey('racing-pending-command'), JSON.stringify(command));
-    else window.sessionStorage.removeItem(storageKey('racing-pending-command'));
-  } catch { /* The in-memory retry token still protects this page session. */ }
+    const headers: Record<string, string> = { 'x-user-id': currentUserId() };
+    if (body !== undefined) headers['content-type'] = 'application/json';
+    res = await fetch(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  } catch { throw new Error('Can\'t reach the server. Check the connection and try again.'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Something went wrong. Try again.'), { status: res.status });
+  return data as T;
 }
 
-async function request<T>(path: string, options?: RequestInit, timeout = 10000): Promise<T> {
-  const startedAs = identity;
-  const fence=accountFence();
-  const response = await fetch(path, { ...options, headers:{...options?.headers,...accountHeaders()}, signal: AbortSignal.timeout(timeout) });
-  fence();
-  if (startedAs !== identity) throw new ApiError('Account changed. Reload before continuing.', 401);
-  if (response.status === 401 || response.status === 403) window.dispatchEvent(new window.Event('racing-auth-change'));
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Could not reach the inventory server.' }));
-    throw new ApiError(error.error || 'The change could not be saved.', response.status);
-  }
-  const result=await response.json();fence();return result;
-}
-export const getState = () => request<InventoryState>('/api/state');
-export const getScanLinks = () => request<Record<string,string>>('/api/labels/scan-links');
-export const getOrderImportConfiguration = () => request<OrderImportConfiguration>('/api/order-import/configuration');
-const extractLocal = (source: File | string) => request<OrderImportDraft>('/api/order-import/extract', {
-  method: 'POST', headers: { 'Content-Type': typeof source === 'string' ? 'text/plain; charset=utf-8' : source.type || (/\.pdf$/i.test(source.name) ? 'application/pdf' : 'application/octet-stream') }, body: source,
-}, 90000);
-export const newCommand = (action: Action, revision?: number): Command => ({ eventId: crypto.randomUUID(), expectedRevision: revision, action, provenance: { source: action.type === 'scan' ? 'simulator' : action.type === 'reset' ? 'demo' : 'buyer' } });
-export const sendCommand = (command: Command) => request<CommandResult>('/api/commands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(command) });
+export const api = {
+  session: () => call<Session>('GET', '/session'),
+  logout: () => call('POST', '/auth/logout'),
+  signUp: (email: string, password: string) => call('POST', '/auth/signup', { email, password }),
+  signIn: (email: string, password: string) => call('POST', '/auth/password', { email, password }),
+  forgotPassword: (email: string) => call('POST', '/auth/forgot', { email }),
+  newPassword: (password: string) => call('POST', '/auth/new-password', { password }),
+  state: () => call<ViewState>('GET', '/state'),
+  directory: () => call<{ teams: Team[]; accounts: Account[] }>('GET', '/directory'),
+  join: (input: { name: string; email?: string; teamId: string }) => call<User>('POST', '/join', input),
+  approve: (id: string, patch: { role?: Role; teamId?: string } = {}) => call<User>('POST', `/users/${id}/approve`, patch),
+  decline: (id: string) => call('POST', `/users/${id}/decline`),
+  updateUser: (id: string, patch: { role?: Role; teamId?: string }) => call<User>('PUT', `/users/${id}`, patch),
+  removeUser: (id: string) => call('DELETE', `/users/${id}`),
+  saveAlerts: (patch: Partial<Pick<AlertSettings, 'enabled' | 'recipients' | 'timing'>>) => call<AlertSettings>('PUT', '/alerts', patch),
+  testAlert: () => call<AlertSettings>('POST', '/alerts/test'),
+  config: () => call<{ scanOrigin: string }>('GET', '/config'),
+  addPart: (input: PartInput) => call<Part>('POST', '/parts', input),
+  editPart: (id: string, input: PartInput) => call<Part>('PUT', `/parts/${id}`, input),
+  deletePart: (id: string) => call('DELETE', `/parts/${id}`),
+  setStatus: (id: string, status: PartStatus, note?: string) => call<{ part: Part; changed: boolean; event: { id: string } | null }>('POST', `/parts/${id}/status`, { status, note }),
+  scanInfo: (id: string, k?: string | null) => call<{ part: Part }>('GET', withKey(`/scan/${id}`, k)),
+  scan: (id: string, k?: string | null) => call<{ part: Part; changed: boolean; eventId: string | null }>('POST', withKey(`/scan/${id}`, k)),
+  undo: (eventId: string, k?: string | null) => call<Part>('POST', withKey(`/undo/${eventId}`, k)),
+  addGroup: (kind: 'teams' | 'cabinets', name: string) => call<Team | Cabinet>('POST', `/${kind}`, { name }),
+  editGroup: (kind: 'teams' | 'cabinets', id: string, patch: { name?: string; color?: string }) => call<Team | Cabinet>('PUT', `/${kind}/${id}`, patch),
+  deleteGroup: (kind: 'teams' | 'cabinets', id: string) => call('DELETE', `/${kind}/${id}`),
+  reset: () => call('POST', '/reset'),
+};
 
-export interface PhotoUploadToken { eventId: string; partId: string; revision: number; hash: string }
-export function readPendingPhoto(): PhotoUploadToken | null {
-  try {
-    const token = JSON.parse(window.sessionStorage.getItem(storageKey('racing-pending-photo')) || 'null');
-    return token && typeof token.eventId === 'string' && typeof token.partId === 'string' && Number.isSafeInteger(token.revision) && typeof token.hash === 'string' ? token : null;
-  } catch { return null; }
-}
-export function persistPendingPhoto(token: PhotoUploadToken | null) {
-  try { if (token) window.sessionStorage.setItem(storageKey('racing-pending-photo'), JSON.stringify(token)); else window.sessionStorage.removeItem(storageKey('racing-pending-photo')); } catch { /* In-memory token still protects retries. */ }
-}
-export async function photoHash(file: File) {
-  const fence=accountFence();const bytes=await file.arrayBuffer();fence();const digest=await crypto.subtle.digest('SHA-256',bytes);fence();
-  return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
-}
-const sendLocalPhoto = (token: PhotoUploadToken, file: File) => request<CommandResult>(`/api/parts/${encodeURIComponent(token.partId)}/photo`, {
-  method: 'POST', headers: { 'Content-Type': file.type, 'X-Event-ID': token.eventId, 'X-Inventory-Revision': String(token.revision) }, body: file,
-});
-export const sendNotificationCommand = (command: NotificationCommand) => request<{ notifications: NotificationSnapshot; message: string }>('/api/notifications/commands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(command) });
-export const getNotifications = () => request<NotificationSnapshot>('/api/notifications');
-export function readPendingEmailCommand(): NotificationCommand | null {
-  try { return JSON.parse(window.sessionStorage.getItem(storageKey('racing-pending-email-command')) || 'null'); } catch { return null; }
-}
-export function persistPendingEmailCommand(command: NotificationCommand | null) {
-  try { if (command) window.sessionStorage.setItem(storageKey('racing-pending-email-command'), JSON.stringify(command)); else window.sessionStorage.removeItem(storageKey('racing-pending-email-command')); } catch { /* In-memory token still protects retries. */ }
-}
-
-let audioContext: AudioContext | undefined;
-export function prepareSound() {
-  try { audioContext ??= new AudioContext(); void audioContext.resume(); } catch { /* Visual confirmation remains available. */ }
-}
-export function playSavedSound() {
-  if (!audioContext || audioContext.state !== 'running') return;
-  const ctx = audioContext;
-  for (const [offset, frequency] of [[0, 880], [0.12, 1174]]) {
-    const tone = ctx.createOscillator(); const gain = ctx.createGain();
-    tone.frequency.value = frequency; tone.connect(gain); gain.connect(ctx.destination);
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
-    gain.gain.exponentialRampToValueAtTime(0.10, ctx.currentTime + offset + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + 0.18);
-    tone.start(ctx.currentTime + offset); tone.stop(ctx.currentTime + offset + 0.2);
-  }
-}
-
-async function stageFile(file: File, purpose: 'photo' | 'order') {
- const fence=accountFence();
- const upload = await request<{uploadId: string; signedUrl: string}>('/api/uploads', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({purpose,size:file.size,mime:file.type || (/\.pdf$/i.test(file.name)?'application/pdf':'application/octet-stream')})});
- const response = await fetch(upload.signedUrl,{method:'PUT',headers:{'Content-Type':file.type || 'application/pdf'},body:file,signal:AbortSignal.timeout(60000)});
- fence();
- if(!response.ok)throw new ApiError('File upload failed. Choose the file and try again.',response.status);
- return upload.uploadId;
-}
-export async function extractOrderDocument(source:File|string):Promise<OrderImportDraft> {
- const fence=accountFence();
- if(apiMode==='local')return extractLocal(source);
- const body=typeof source==='string'?{text:source}:{uploadId:await stageFile(source,'order')};
- fence();
- return request('/api/order-import/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)},90000);
-}
-const photoUploads=new Map<string,{id:string;at:number}>();
-export async function sendPhoto(token:PhotoUploadToken,file:File):Promise<CommandResult> {
- const fence=accountFence();
- if(apiMode==='local')return sendLocalPhoto(token,file);
- const key=identity+':'+token.eventId;
- let upload=photoUploads.get(key);
- if(!upload || Date.now()-upload.at>14*60000){upload={id:await stageFile(file,'photo'),at:Date.now()};photoUploads.set(key,upload);}
- fence();
- return request('/api/parts/'+encodeURIComponent(token.partId)+'/photo',{method:'POST',headers:{'Content-Type':'application/json','X-Event-ID':token.eventId,'X-Inventory-Revision':String(token.revision)},body:JSON.stringify({uploadId:upload.id})});
+/** Shrink a chosen photo to a small square-ish JPEG data URL so storage stays light. */
+export function shrinkPhoto(file: File, max = 480): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(img.src);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = () => reject(new Error('That file isn\'t a photo we can read.'));
+    img.src = URL.createObjectURL(file);
+  });
 }
